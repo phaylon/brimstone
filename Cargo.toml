@@ -1,0 +1,16 @@
+[package]
+name = "brimstone"
+version = "0.1.0"
+authors = ["Robert Sedlacek <rs@474.at>"]
+
+[dependencies]
+gio = "*"
+
+[dependencies.webkit2gtk]
+version = "*"
+features = ["v2_16"]
+
+[dependencies.gtk]
+version = "*"
+features = ["v3_18"]
+
