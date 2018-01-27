@@ -4,17 +4,18 @@ use std::cell;
 
 use gtk;
 use webkit2gtk;
+use cairo;
 
 use navigation_bar;
 use page_store;
 use app_action;
+use status_bar;
 
 pub struct Data {
     pub application: gtk::Application,
     pub window: gtk::ApplicationWindow,
     pub main_paned: gtk::Paned,
     pub page_tree_view: gtk::TreeView,
-    pub page_tree_store: gtk::TreeStore,
     pub navigation_bar: rc::Rc<navigation_bar::Bar>,
     pub page_store: rc::Rc<page_store::Store>,
     pub view_space: gtk::Box,
@@ -23,6 +24,8 @@ pub struct Data {
     pub active_page_store_id: rc::Rc<cell::Cell<Option<page_store::Id>>>,
     pub active_webview: rc::Rc<cell::RefCell<Option<webkit2gtk::WebView>>>,
     pub app_actions: rc::Rc<app_action::Map>,
+    pub empty_favicon: cairo::ImageSurface,
+    pub status_bar: rc::Rc<status_bar::Bar>,
 }
 
 impl Data {
@@ -34,11 +37,6 @@ impl Data {
             }
         }
         false
-    }
-
-    pub fn perform<A>(&self, action: A) -> A::Result
-    where A: Perform {
-        action.perform(self)
     }
 }
 
@@ -67,6 +65,32 @@ pub struct Handle {
 }
 
 impl Handle {
+
+    pub fn get_active(&self) -> Option<page_store::Id> {
+        let data = try_extract!(self.data.upgrade());
+        data.active_page_store_id.get()
+    }
+
+    pub fn set_active(&self, id: page_store::Id, view: webkit2gtk::WebView) {
+        let data = try_extract!(self.data.upgrade());
+        data.active_page_store_id.set(Some(id));
+        *data.active_webview.borrow_mut() = Some(view);
+    }
+
+    pub fn is_active(&self, id: page_store::Id) -> bool {
+        let data = match self.data.upgrade() {
+            Some(data) => data,
+            None => return false,
+        };
+        if let Some(active_id) = data.active_page_store_id.get() {
+            return active_id == id;
+        }
+        false
+    }
+
+    pub fn empty_favicon(&self) -> Option<cairo::ImageSurface> {
+        self.data.upgrade().map(|data| data.empty_favicon.clone())
+    }
 
     pub fn application(&self) -> Option<gtk::Application> {
         self.data.upgrade().map(|data| data.application.clone())
@@ -100,7 +124,11 @@ impl Handle {
     }
 
     pub fn page_tree_store(&self) -> Option<gtk::TreeStore> {
-        self.data.upgrade().map(|data| data.page_tree_store.clone())
+        self.data.upgrade().map(|data| data.page_store.tree_store().clone())
+    }
+
+    pub fn status_bar(&self) -> Option<status_bar::Handle> {
+        self.data.upgrade().map(|data| status_bar::Handle::new(data.status_bar.clone()))
     }
 
     pub fn navigation_bar(&self) -> Option<navigation_bar::Handle> {
@@ -119,9 +147,9 @@ impl Handle {
         self.data.upgrade().map(|data| data.user_content_manager.clone())
     }
 
-    pub fn perform<A>(&self, action: A) -> Option<A::Result>
+    pub fn perform<A>(&self, action: A) -> A::Result
     where A: Perform {
-        self.data.upgrade().map(|data| action.perform(&data))
+        action.perform(self)
     }
 
     pub fn with_cloned<F, R>(&self, callback: F) -> R
@@ -134,5 +162,5 @@ pub trait Perform {
 
     type Result;
 
-    fn perform(self, data: &Data) -> Self::Result;
+    fn perform(self, app: &Handle) -> Self::Result;
 }

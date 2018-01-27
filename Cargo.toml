@@ -4,7 +4,11 @@ version = "0.1.0"
 authors = ["Robert Sedlacek <rs@474.at>"]
 
 [dependencies]
+glib = "*"
 gio = "*"
+gdk = "*"
+pango = "*"
+cairo-rs = "*"
 
 [dependencies.webkit2gtk]
 version = "*"

@@ -11,15 +11,20 @@ pub fn create() -> gtk::Paned {
 }
 
 pub fn setup(app: app::Handle) {
-    use gtk::{ PanedExt, ContainerExt, BoxExt };
+    use gtk::{ PanedExt, BoxExt };
     
     let main_paned = app.main_paned().unwrap();
-    main_paned.pack1(&scrolled::create(app.page_tree_view().unwrap()), false, true);
+    
+    let page_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    page_box.pack_start(&scrolled::create(app.page_tree_view().unwrap()), true, true, 0);
+    page_box.pack_start(&app.status_bar().unwrap().page_tree_status(), false, true, 0);
 
     let web_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
     web_box.pack_start(&app.navigation_bar().unwrap().container(), false, true, 0);
     web_box.pack_start(&app.view_space().unwrap(), true, true, 0);
+    web_box.pack_start(&app.status_bar().unwrap().webview_status(), false, true, 0);
 
+    main_paned.pack1(&page_box, false, true);
     main_paned.pack2(&web_box, true, true);
     main_paned.set_position(150);
 }

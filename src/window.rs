@@ -8,7 +8,7 @@ pub fn create(app: &gtk::Application) -> gtk::ApplicationWindow {
     
     let window = gtk::ApplicationWindow::new(&app);
     window.set_title("Brimstone");
-    window.set_default_geometry(400, 300);
+    window.set_default_geometry(600, 300);
 
     window
 }
