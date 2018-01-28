@@ -27,9 +27,12 @@ pub fn setup(app: app::Handle) {
     });
 }
 
-pub enum CloseAnswer { Close, Cancel }
-
-pub fn confirm_close(window: &gtk::ApplicationWindow, what: &str) -> CloseAnswer {
+pub fn confirm_action(
+    window: &gtk::ApplicationWindow,
+    text: &str,
+    buttons: &[(&str, i32)],
+    default: i32,
+) -> i32 {
     use gtk::{ DialogExt, WidgetExt };
 
     let dialog = gtk::MessageDialog::new(
@@ -37,26 +40,38 @@ pub fn confirm_close(window: &gtk::ApplicationWindow, what: &str) -> CloseAnswer
         gtk::DialogFlags::MODAL | gtk::DialogFlags::DESTROY_WITH_PARENT,
         gtk::MessageType::Question,
         gtk::ButtonsType::None,
-        &format!("Do you really want to close {}?", what),
+        text,
     );
+
+    for button in buttons {
+        dialog.add_button(button.0, button.1);
+    }
+    dialog.set_default_response(default);
+
+    let result = dialog.run();
+
+    dialog.destroy();
+
+    result
+}
+
+pub enum CloseAnswer { Close, Cancel }
+
+pub fn confirm_close(window: &gtk::ApplicationWindow, what: &str) -> CloseAnswer {
 
     const CLOSE: i32 = 2;
     const CANCEL: i32 = 3;
 
-    dialog.add_button("Close", CLOSE);
-    dialog.add_button("Cancel", CANCEL);
-    dialog.set_default_response(CLOSE);
-
-    let delete_id: i32 = gtk::ResponseType::DeleteEvent.into();
-    let result = match dialog.run() {
+    let result = confirm_action(
+        window,
+        &format!("Do you really want to close {}?", what),
+        &[("Close", CLOSE), ("Cancel", CANCEL)],
+        CLOSE,
+    );
+    match result {
         CLOSE => CloseAnswer::Close,
-        CANCEL => CloseAnswer::Cancel,
-        other if other == delete_id => CloseAnswer::Cancel,
-        other => panic!("Unexpected close dialog return value: {}", other),
-    };
-
-    dialog.destroy();
-    result
+        _ => CloseAnswer::Cancel,
+    }
 }
 
 pub fn present(app: &app::Application) {

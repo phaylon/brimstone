@@ -40,31 +40,29 @@ impl app::Perform for Close {
         let webview = try_extract!(app.active_webview());
         let page_store = try_extract!(app.page_store());
         let page_tree_view = try_extract!(app.page_tree_view());
+        let window = try_extract!(app.window());
 
         let close_children =
             if let Some(close_children) = self.close_children {
                 close_children
             } else if let Some(count) = page_store.has_children(self.id) {
-                let expanded = page_tree_view::is_expanded(
-                    &page_store.tree_store(),
-                    &page_tree_view,
-                    self.id,
+                const CLOSE_ALL: i32 = 1;
+                const CLOSE_ONE: i32 = 2;
+                const CANCEL: i32 = 3;
+                let answer = window::confirm_action(
+                    &window,
+                    &format!("Do you want to close {} pages?", count + 1),
+                    &[
+                        ("Close Current", CLOSE_ONE),
+                        ("Close All", CLOSE_ALL),
+                        ("Cancel", CANCEL),
+                    ],
+                    CLOSE_ONE,
                 );
-                if expanded {
-                    false
-                } else {
-                    let window = try_extract!(app.window());
-                    let answer = window::confirm_close(
-                        &window,
-                        &format!("{} {}",
-                            count,
-                            if count == 1 { "child page" } else { "child pages" },
-                        ),
-                    );
-                    match answer {
-                        window::CloseAnswer::Cancel => return,
-                        window::CloseAnswer::Close => true,
-                    }
+                match answer {
+                    CLOSE_ALL => true,
+                    CLOSE_ONE => false,
+                    _ => return,
                 }
             } else {
                 false
