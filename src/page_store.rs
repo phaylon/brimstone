@@ -60,7 +60,6 @@ impl Store {
 
     pub fn nth_child(&self, parent: Option<Id>, index: u32) -> Option<Id> {
         use gtk::{ TreeModelExt, Cast };
-        println!("nth child {}", index);
 
         let model: gtk::TreeModel = self.tree_store.clone().upcast();
         let parent_iter = parent
@@ -71,7 +70,6 @@ impl Store {
         };
         let child_id: Id = page_tree_store::get::id(&model, &child_iter);
         let child_title: String = page_tree_store::get::title(&model, &child_iter);
-        println!("child '{}'", child_title);
         Some(child_id)
     }
 
@@ -175,11 +173,40 @@ impl Store {
         let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
 
         if !close_children {
-            for (child_id, child_iter) in self.children(Some(&iter)) {
-                self.tree_store.move_before(&child_iter, &iter);
+            let (curr_parent, curr_position) = try_extract!(self.position(id));
+            let children = self.children(Some(&iter));
+            for child_index in 0..children.len() {
+                let &(child_id, ref child_iter) = &children[child_index];
+                self.move_to(
+                    child_id,
+                    curr_parent,
+                    (curr_position + child_index as u32) as i32,
+                );
             }
         }
         deep_close(self, &model, &self.tree_store, &iter);
+    }
+
+    pub fn move_to(&self, id: Id, parent: Option<Id>, position: i32) {
+        use gtk::{ TreeStoreExt, TreeModelExt, TreeStoreExtManual };
+        
+        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
+
+        let mut values = Vec::new();
+        for column in 0..self.tree_store.get_n_columns() {
+            values.push(self.tree_store.get_value(&iter, column));
+        }
+
+        self.tree_store.remove(&iter);
+
+        let parent_iter = parent
+            .map(|id| page_tree_store::find_iter_by_id(&self.tree_store, id).unwrap());
+
+        let iter = self.tree_store.insert(parent_iter.as_ref(), position);
+
+        for column in 0..values.len() {
+            self.tree_store.set_value(&iter, column as u32, &values[column]);
+        }
     }
 
     pub fn get_uri(&self, id: Id) -> Option<String> {

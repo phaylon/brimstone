@@ -55,8 +55,8 @@ impl Bar {
     pub fn new() -> Bar {
         Bar {
             size_group: gtk::SizeGroup::new(gtk::SizeGroupMode::Vertical),
-            page_tree_status: gtk::Box::new(gtk::Orientation::Horizontal, 0),
-            webview_status: gtk::Box::new(gtk::Orientation::Horizontal, 0),
+            page_tree_status: gtk::Box::new(gtk::Orientation::Horizontal, 5),
+            webview_status: gtk::Box::new(gtk::Orientation::Horizontal, 5),
             page_counter: gtk::Label::new("0"),
             webview_info: gtk::Label::new(None),
             hover_uri: cell::RefCell::new(None),
@@ -71,8 +71,12 @@ pub fn setup(app: app::Handle) {
     let bar = try_extract!(app.status_bar());
 
     bar.page_tree_status().pack_start(&bar.page_counter(), true, true, 0);
+    bar.page_tree_status().set_margin_top(3);
+    bar.page_tree_status().set_margin_bottom(3);
 
     bar.webview_status().pack_start(&bar.webview_info(), true, true, 0);
+    bar.webview_status().set_margin_top(3);
+    bar.webview_status().set_margin_bottom(3);
 
     bar.webview_info().set_halign(gtk::Align::Start);
     bar.webview_info().set_ellipsize(pango::EllipsizeMode::End);

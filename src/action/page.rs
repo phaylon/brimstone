@@ -17,7 +17,11 @@ impl app::Perform for UpdateCounter {
         let page_store = try_extract!(app.page_store());
         let status_bar = try_extract!(app.status_bar());
 
-        status_bar.page_counter().set_text(&format!("{}", page_store.get_count()));
+        let count = page_store.get_count();
+        status_bar.page_counter().set_text(&format!("{} {}",
+            count,
+            if count == 1 { "page" } else { "pages" },
+        ));
     }
 }
 
@@ -99,6 +103,8 @@ impl app::Perform for Close {
             page_tree_view.get_selection().unselect_all();
             page_tree_view::select_id(&page_store.tree_store(), &page_tree_view, select);
         }
+
+        app.perform(UpdateCounter);
     }
 }
 

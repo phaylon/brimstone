@@ -96,6 +96,10 @@ impl Handle {
         self.data.upgrade().map(|data| data.select_ignore.get()).unwrap_or(true)
     }
 
+    pub fn set_select_ignored(&self, ignored: bool) {
+        self.data.upgrade().map(|data| data.select_ignore.set(ignored));
+    }
+
     pub fn without_select<F, R>(&self, body: F) -> R where F: FnOnce() -> R {
         self.data.upgrade().map(|data| data.select_ignore.set(true));
         let result = body();

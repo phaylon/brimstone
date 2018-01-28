@@ -8,9 +8,11 @@ use action;
 use page_store;
 
 pub fn select_id(store: &gtk::TreeStore, view: &gtk::TreeView, id: page_store::Id) {
-    use gtk::{ TreeViewExt, TreeSelectionExt };
+    use gtk::{ TreeViewExt, TreeSelectionExt, TreeModelExt };
 
     let iter = try_extract!(page_tree_store::find_iter_by_id(store, id));
+    let path = try_extract!(store.get_path(&iter));
+    view.expand_to_path(&path);
     view.get_selection().select_iter(&iter);
 }
 
@@ -35,12 +37,13 @@ pub fn is_expanded(store: &gtk::TreeStore, view: &gtk::TreeView, id: page_store:
 }
 
 pub fn create() -> gtk::TreeView {
-    use gtk::{ TreeViewExt, CellLayoutExt, TreeSelectionExt, CellRendererTextExt };
+    use gtk::{ TreeViewExt, CellLayoutExt, TreeSelectionExt, CellRendererTextExt, WidgetExt };
 
     let view = gtk::TreeView::new();
     view.set_enable_tree_lines(true);
     view.set_headers_visible(false);
     view.set_show_expanders(true);
+    view.set_reorderable(true);
 
     let title_column = gtk::TreeViewColumn::new();
     let title_cell = gtk::CellRendererText::new();
@@ -59,20 +62,28 @@ pub fn create() -> gtk::TreeView {
 }
 
 pub fn setup(app: app::Handle) {
-    use gtk::{ TreeViewExt, TreeSelectionExt };
+    use gtk::{ TreeViewExt, TreeSelectionExt, WidgetExt };
 
     let page_tree_view = app.page_tree_view().unwrap();
     page_tree_view.set_model(&app.page_tree_store().unwrap());
 
-    app.with_cloned(|app| {
-        page_tree_view.get_selection().connect_changed(move |selection| {
-            let (model, iter) = match selection.get_selected() {
-                None => return,
-                Some(selected) => selected,
-            };
-            let id = page_tree_store::get::id(&model, &iter);
-            app.perform(action::page::Select { id });
-        });
-    });
+    page_tree_view.connect_drag_begin(with_cloned!(app, move |view, _| {
+        app.set_select_ignored(true);
+    }));
+    page_tree_view.connect_drag_end(with_cloned!(app, move |view, _| {
+        app.set_select_ignored(false);
+        let store = try_extract!(app.page_tree_store());
+        let id = try_extract!(app.get_active());
+        select_id(&store, view, id);
+    }));
+
+    page_tree_view.get_selection().connect_changed(with_cloned!(app, move |selection| {
+        let (model, iter) = match selection.get_selected() {
+            None => return,
+            Some(selected) => selected,
+        };
+        let id = page_tree_store::get::id(&model, &iter);
+        app.perform(action::page::Select { id });
+    }));
 }
 
