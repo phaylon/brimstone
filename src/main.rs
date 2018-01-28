@@ -21,6 +21,8 @@ pub mod webview;
 pub mod app_action;
 pub mod status_bar;
 pub mod mouse;
+pub mod page_bar;
+pub mod bar;
 
 use std::rc;
 use std::cell;
@@ -130,6 +132,9 @@ fn setup(app: &gtk::Application, app_space: &rc::Rc<cell::RefCell<Option<app::Ap
         app_actions: rc::Rc::new(app_action::create()),
         empty_favicon: cairo::ImageSurface::create(cairo::Format::A8, 16, 16).unwrap(),
         status_bar: rc::Rc::new(status_bar::Bar::new()),
+        page_bar: rc::Rc::new(page_bar::create()),
+        bar_size_group: gtk::SizeGroup::new(gtk::SizeGroupMode::Vertical),
+        select_ignore: cell::Cell::new(false),
     });
 
     window::setup(app.handle());
@@ -138,6 +143,7 @@ fn setup(app: &gtk::Application, app_space: &rc::Rc<cell::RefCell<Option<app::Ap
     navigation_bar::setup(app.handle());
     app_action::setup(app.handle());
     status_bar::setup(app.handle());
+    page_bar::setup(app.handle());
 
     window::present(&app);
 

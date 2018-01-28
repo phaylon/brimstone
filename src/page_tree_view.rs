@@ -24,6 +24,16 @@ pub fn expand_id(store: &gtk::TreeStore, view: &gtk::TreeView, id: page_store::I
     view.expand_row(&path, all);
 }
 
+pub fn is_expanded(store: &gtk::TreeStore, view: &gtk::TreeView, id: page_store::Id) -> bool {
+    use gtk::{ TreeViewExt, TreeModelExt, Cast };
+
+    let iter = try_extract!(page_tree_store::find_iter_by_id(store, id));
+    let model: gtk::TreeModel = store.clone().upcast();
+    let path = try_extract!(model.get_path(&iter));
+
+    view.row_expanded(&path)
+}
+
 pub fn create() -> gtk::TreeView {
     use gtk::{ TreeViewExt, CellLayoutExt, TreeSelectionExt, CellRendererTextExt };
 

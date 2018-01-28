@@ -2,6 +2,8 @@
 use app;
 use page_store;
 use action;
+use page_tree_view;
+use window;
 
 pub struct UpdateCounter;
 
@@ -16,6 +18,87 @@ impl app::Perform for UpdateCounter {
         let status_bar = try_extract!(app.status_bar());
 
         status_bar.page_counter().set_text(&format!("{}", page_store.get_count()));
+    }
+}
+
+pub struct Close {
+    pub id: page_store::Id,
+    pub close_children: Option<bool>,
+}
+
+impl app::Perform for Close {
+
+    type Result = ();
+
+    fn perform(self, app: &app::Handle) {
+        use gtk::{ TreeSelectionExt, TreeViewExt };
+
+        let webview = try_extract!(app.active_webview());
+        let page_store = try_extract!(app.page_store());
+        let page_tree_view = try_extract!(app.page_tree_view());
+
+        let close_children =
+            if let Some(close_children) = self.close_children {
+                close_children
+            } else if let Some(count) = page_store.has_children(self.id) {
+                let expanded = page_tree_view::is_expanded(
+                    &page_store.tree_store(),
+                    &page_tree_view,
+                    self.id,
+                );
+                if expanded {
+                    false
+                } else {
+                    let window = try_extract!(app.window());
+                    let answer = window::confirm_close(
+                        &window,
+                        &format!("{} {}",
+                            count,
+                            if count == 1 { "child page" } else { "child pages" },
+                        ),
+                    );
+                    match answer {
+                        window::CloseAnswer::Cancel => return,
+                        window::CloseAnswer::Close => true,
+                    }
+                }
+            } else {
+                false
+            };
+
+        let active_id = try_extract!(app.get_active());
+
+        let position =
+            if self.id == active_id {
+                page_store.position(self.id)
+            } else {
+                None
+            };
+
+        let select = 
+            if let Some((parent, position)) = position {
+                let select =
+                    if let Some(id) = page_store.find_previous(parent, position) { id }
+                    else if let Some(id) = page_store.find_next_incl(parent, position + 1) { id }
+                    else {
+                        app.perform(Create {
+                            uri: "about:blank".into(),
+                            title: Some("about:blank".into()),
+                            parent: None,
+                            position: page_store::InsertPosition::End,
+                        }).expect("created fallback page")
+                    };
+                Some(select)
+            } else {
+                None
+            };
+
+        app.without_select(|| page_store.close(self.id, close_children));
+        
+        if let Some(select) = select {
+            page_tree_view.get_selection().unselect_all();
+            page_tree_view::select_id(&page_store.tree_store(), &page_tree_view, select);
+        }
     }
 }
 
@@ -57,6 +140,10 @@ impl app::Perform for Select {
 
     fn perform(self, app: &app::Handle) {
         use gtk::{ ContainerExt, WidgetExt, BoxExt, EntryExt };
+
+        if app.is_select_ignored() {
+            return;
+        }
 
         let page_store = try_extract!(app.page_store());
         let view_space = try_extract!(app.view_space());

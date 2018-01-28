@@ -15,6 +15,7 @@ const ACCEL_GO_BACK: &str = "<alt>Left";
 const ACCEL_GO_FORWARD: &str = "<alt>Right";
 const ACCEL_NEW: &str = "<ctrl>t";
 const ACCEL_CLOSE: &str = "<ctrl>w";
+const ACCEL_FOCUS: &str = "<ctrl>l";
 
 pub const ACTION_QUIT: &str = "app.quit";
 pub const ACTION_GO_BACK: &str = "app.go-back";
@@ -24,6 +25,7 @@ pub const ACTION_RELOAD_BP: &str = "app.reload-bp";
 pub const ACTION_STOP: &str = "app.stop-loading";
 pub const ACTION_NEW: &str = "app.new-page";
 pub const ACTION_CLOSE: &str = "app.close-page";
+pub const ACTION_FOCUS: &str = "app.focus";
 
 pub struct Map {
     pub menu_bar: gio::Menu,
@@ -35,6 +37,7 @@ pub struct Map {
     pub reload_bp_action: gio::SimpleAction,
     pub new_page_action: gio::SimpleAction,
     pub close_page_action: gio::SimpleAction,
+    pub focus_action: gio::SimpleAction,
 }
 
 pub fn create() -> Map {
@@ -48,6 +51,7 @@ pub fn create() -> Map {
         reload_bp_action: gio::SimpleAction::new("reload-bp", None),
         new_page_action: gio::SimpleAction::new("new-page", None),
         close_page_action: gio::SimpleAction::new("close-page", None),
+        focus_action: gio::SimpleAction::new("focus", None),
     }
 }
 
@@ -171,7 +175,16 @@ pub fn setup(app: app::Handle) {
         let navigation_bar = try_extract!(app.navigation_bar());
         navigation_bar.address_entry().grab_focus();
     });
+    setup_action(&app, &app_actions.focus_action, true, |app| {
+        let navigation_bar = try_extract!(app.navigation_bar());
+        navigation_bar.address_entry().grab_focus();
+    });
+    application.add_accelerator(ACCEL_FOCUS, ACTION_FOCUS, None);
     setup_action(&app, &app_actions.close_page_action, true, |app| {
+        app.perform(action::page::Close {
+            id: try_extract!(app.get_active()),
+            close_children: None,
+        });
     });
 }
 

@@ -5,6 +5,7 @@ use gtk;
 
 use app;
 use app_action;
+use bar;
 
 pub struct Bar {
     pub container: gtk::Box,
@@ -40,45 +41,17 @@ impl Handle {
 
 pub fn create() -> Bar {
     Bar {
-        container: create_container(),
-        address_entry: create_address_entry(),
-        go_back_button: create_nav_button("go-previous", false, true),
-        go_forward_button: create_nav_button("go-next", false, true),
-        reload_button: create_nav_button("view-refresh", true, true),
-        stop_button: create_nav_button("process-stop", true, false),
+        container: bar::create_container(),
+        address_entry:bar::create_address_entry(),
+        go_back_button: bar::create_nav_button("go-previous", false, true),
+        go_forward_button: bar::create_nav_button("go-next", false, true),
+        reload_button: bar::create_nav_button("view-refresh", true, true),
+        stop_button: bar::create_nav_button("process-stop", true, false),
     }
-}
-
-fn create_nav_button(name: &str, sensitivity: bool, visibility: bool) -> gtk::Button {
-    use gtk::{ WidgetExt };
-
-    let button = gtk::Button::new_from_icon_name(
-        name,
-        gtk::IconSize::SmallToolbar.into(),
-    );
-    button.set_sensitive(sensitivity);
-    button.set_visible(visibility);
-    if !visibility {
-        button.set_no_show_all(true);
-    }
-    button
-}
-
-fn create_address_entry() -> gtk::Entry {
-    use gtk::{ EntryExt };
-
-    let entry = gtk::Entry::new();
-    entry.set_activates_default(false);
-
-    entry
-}
-
-fn create_container() -> gtk::Box {
-    gtk::Box::new(gtk::Orientation::Horizontal, 5)
 }
 
 pub fn setup(app: app::Handle) {
-    use gtk::{ BoxExt, EntryExt, WidgetExt, ActionableExt };
+    use gtk::{ BoxExt, EntryExt, WidgetExt, ActionableExt, SizeGroupExt };
     use webkit2gtk::{ WebViewExt };
     use gio::{ ActionExt };
     use gdk;
@@ -112,4 +85,6 @@ pub fn setup(app: app::Handle) {
         })();
         gtk::prelude::Inhibit(false)
     }));
+
+    app.bar_size_group().unwrap().add_widget(&bar.container);
 }

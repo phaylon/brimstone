@@ -20,16 +20,16 @@ pub fn setup(app: app::Handle) {
     window.add(&app.main_paned().unwrap());
 
     window.connect_delete_event(|window, _event| {
-        match confirm_close(window) {
+        match confirm_close(window, "the application") {
             CloseAnswer::Close => gtk::prelude::Inhibit(false),
             CloseAnswer::Cancel => gtk::prelude::Inhibit(true),
         }
     });
 }
 
-enum CloseAnswer { Close, Cancel }
+pub enum CloseAnswer { Close, Cancel }
 
-fn confirm_close(window: &gtk::ApplicationWindow) -> CloseAnswer {
+pub fn confirm_close(window: &gtk::ApplicationWindow, what: &str) -> CloseAnswer {
     use gtk::{ DialogExt, WidgetExt };
 
     let dialog = gtk::MessageDialog::new(
@@ -37,7 +37,7 @@ fn confirm_close(window: &gtk::ApplicationWindow) -> CloseAnswer {
         gtk::DialogFlags::MODAL | gtk::DialogFlags::DESTROY_WITH_PARENT,
         gtk::MessageType::Question,
         gtk::ButtonsType::None,
-        "Do you really want to close the application?",
+        &format!("Do you really want to close {}?", what),
     );
 
     const CLOSE: i32 = 2;

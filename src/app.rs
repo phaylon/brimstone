@@ -10,6 +10,7 @@ use navigation_bar;
 use page_store;
 use app_action;
 use status_bar;
+use page_bar;
 
 pub struct Data {
     pub application: gtk::Application,
@@ -26,6 +27,9 @@ pub struct Data {
     pub app_actions: rc::Rc<app_action::Map>,
     pub empty_favicon: cairo::ImageSurface,
     pub status_bar: rc::Rc<status_bar::Bar>,
+    pub page_bar: rc::Rc<page_bar::Bar>,
+    pub bar_size_group: gtk::SizeGroup,
+    pub select_ignore: cell::Cell<bool>,
 }
 
 impl Data {
@@ -88,6 +92,17 @@ impl Handle {
         false
     }
 
+    pub fn is_select_ignored(&self) -> bool {
+        self.data.upgrade().map(|data| data.select_ignore.get()).unwrap_or(true)
+    }
+
+    pub fn without_select<F, R>(&self, body: F) -> R where F: FnOnce() -> R {
+        self.data.upgrade().map(|data| data.select_ignore.set(true));
+        let result = body();
+        self.data.upgrade().map(|data| data.select_ignore.set(false));
+        result
+    }
+
     pub fn empty_favicon(&self) -> Option<cairo::ImageSurface> {
         self.data.upgrade().map(|data| data.empty_favicon.clone())
     }
@@ -123,8 +138,16 @@ impl Handle {
         self.data.upgrade().map(|data| data.page_tree_view.clone())
     }
 
+    pub fn bar_size_group(&self) -> Option<gtk::SizeGroup> {
+        self.data.upgrade().map(|data| data.bar_size_group.clone())
+    }
+
     pub fn page_tree_store(&self) -> Option<gtk::TreeStore> {
         self.data.upgrade().map(|data| data.page_store.tree_store().clone())
+    }
+
+    pub fn page_bar(&self) -> Option<page_bar::Handle> {
+        self.data.upgrade().map(|data| page_bar::Handle::new(data.page_bar.clone()))
     }
 
     pub fn status_bar(&self) -> Option<status_bar::Handle> {

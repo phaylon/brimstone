@@ -52,6 +52,136 @@ impl Store {
         Some(page_tree_store::get::id(&model, &parent_iter))
     }
 
+    pub fn position(&self, id: Id) -> Option<(Option<Id>, u32)> {
+        let parent = self.get_parent(id);
+        let position = try_extract!(page_tree_store::find_position(&self.tree_store, id, parent));
+        Some((parent, position))
+    }
+
+    pub fn nth_child(&self, parent: Option<Id>, index: u32) -> Option<Id> {
+        use gtk::{ TreeModelExt, Cast };
+        println!("nth child {}", index);
+
+        let model: gtk::TreeModel = self.tree_store.clone().upcast();
+        let parent_iter = parent
+            .map(|id| page_tree_store::find_iter_by_id(&self.tree_store, id).unwrap());
+        let child_iter = match model.iter_nth_child(parent_iter.as_ref(), index as i32) {
+            Some(child) => child,
+            None => return None,
+        };
+        let child_id: Id = page_tree_store::get::id(&model, &child_iter);
+        let child_title: String = page_tree_store::get::title(&model, &child_iter);
+        println!("child '{}'", child_title);
+        Some(child_id)
+    }
+
+    pub fn has_children(&self, id: Id) -> Option<i32> {
+        use gtk::{ TreeModelExt, Cast };
+
+        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
+        let count = self.tree_store.iter_n_children(Some(&iter));
+        if count > 0 {
+            Some(count)
+        } else {
+            None
+        }
+    }
+
+    pub fn find_next_incl(&self, parent: Option<Id>, position: u32) -> Option<Id> {
+
+        let mut position = position;
+        let mut parent = parent;
+
+        loop {
+            if let Some(next_id) = self.nth_child(parent, position) {
+                return Some(next_id);
+            }
+            if let Some(parent_id) = parent {
+                let (parent_parent, parent_position) = try_extract!(self.position(parent_id));
+                parent = parent_parent;
+                position = parent_position + 1;
+                continue;
+            }
+            return None;
+        }
+    }
+
+    pub fn find_previous(&self, parent: Option<Id>, position: u32) -> Option<Id> {
+
+        if position == 0 {
+            if let Some(parent_id) = parent {
+                return Some(parent_id);
+            }
+            return None;
+        }
+
+        if let Some(prev_id) = self.nth_child(parent, position - 1) {
+            return Some(prev_id);
+        }
+
+        None
+    }
+
+    fn children(&self, parent: Option<&gtk::TreeIter>) -> Vec<(Id, gtk::TreeIter)> {
+        use gtk::{ TreeModelExt, Cast };
+
+        let model: gtk::TreeModel = self.tree_store.clone().upcast();
+        let mut children = Vec::new();
+        let count = model.iter_n_children(parent);
+        for index in 0..count {
+            let child = model.iter_nth_child(parent, index).expect("child iter");
+            let child_id: Id = page_tree_store::get::id(&model, &child);
+            children.push((child_id, child));
+        }
+        children
+    }
+
+    pub fn close(&self, id: Id, close_children: bool) {
+        use gtk::{ Cast, TreeStoreExt, TreeModelExt, ContainerExt, WidgetExt };
+
+        fn deep_close(
+            page_store: &Store,
+            model: &gtk::TreeModel,
+            store: &gtk::TreeStore,
+            iter: &gtk::TreeIter,
+        ) {
+            let id: Id = page_tree_store::get::id(&model, &iter);
+            for (child_id, child_iter) in page_store.children(Some(iter)) {
+                deep_close(page_store, model, store, &child_iter);
+            }
+            store.remove(iter);
+            let mut entries = page_store.entries.borrow_mut();
+            let index = entries.iter().position(|entry| entry.id == id).unwrap();
+            let entry = entries.remove(index);
+            let webview = match entry.view {
+                Some(webview) => webview,
+                None => return,
+            };
+            let mut widget: gtk::Widget = webview.upcast();
+            while let Some(parent) = widget.get_parent() {
+                if let Some(name) = parent.get_name() {
+                    if &name == "view-space" {
+                        let view_space = parent.downcast::<gtk::Container>()
+                            .expect("view-space to gtk::Container");
+                        view_space.remove(&widget);
+                        break;
+                    }
+                }
+                widget = parent;
+            }
+        }
+        
+        let model = self.tree_store.clone().upcast();
+        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
+
+        if !close_children {
+            for (child_id, child_iter) in self.children(Some(&iter)) {
+                self.tree_store.move_before(&child_iter, &iter);
+            }
+        }
+        deep_close(self, &model, &self.tree_store, &iter);
+    }
+
     pub fn get_uri(&self, id: Id) -> Option<String> {
         self.map_entry(id, |entry| entry.uri.clone())
     }
