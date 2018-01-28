@@ -6,6 +6,7 @@ use app;
 use page_tree_store;
 use action;
 use page_store;
+use mouse;
 
 pub fn select_id(store: &gtk::TreeStore, view: &gtk::TreeView, id: page_store::Id) {
     use gtk::{ TreeViewExt, TreeSelectionExt, TreeModelExt };
@@ -84,6 +85,31 @@ pub fn setup(app: app::Handle) {
         };
         let id = page_tree_store::get::id(&model, &iter);
         app.perform(action::page::Select { id });
+    }));
+
+    page_tree_view.connect_button_press_event(with_cloned!(app, move |view, event| {
+        use gtk::{ TreeModelExt, Cast, MenuExtManual };
+
+        if event.get_button() == mouse::BUTTON_RIGHT {
+            (||{
+                let store = try_extract!(app.page_tree_store());
+                let model = store.upcast();
+                let (x, y) = event.get_position();
+                match view.get_path_at_pos(x as _, y as _) {
+                    Some((Some(path), _, _, _)) => {
+                        let iter = try_extract!(view.get_model().unwrap().get_iter(&path));
+                        let id = page_tree_store::get::id(&model, &iter);
+                        app.set_page_tree_target(Some(id));
+                        let menu = try_extract!(app.page_context_menu()).menu();
+                        menu.popup_easy(event.get_button(), event.get_time());
+                    },
+                    _ => (),
+                };
+            })();
+            gtk::prelude::Inhibit(true)
+        } else {
+            gtk::prelude::Inhibit(false)
+        }
     }));
 }
 

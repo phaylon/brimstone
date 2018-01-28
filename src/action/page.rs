@@ -37,7 +37,6 @@ impl app::Perform for Close {
     fn perform(self, app: &app::Handle) {
         use gtk::{ TreeSelectionExt, TreeViewExt };
 
-        let webview = try_extract!(app.active_webview());
         let page_store = try_extract!(app.page_store());
         let page_tree_view = try_extract!(app.page_tree_view());
         let window = try_extract!(app.window());
@@ -68,10 +67,10 @@ impl app::Perform for Close {
                 false
             };
 
-        let active_id = try_extract!(app.get_active());
+        let active_id = app.get_active();
 
         let position =
-            if self.id == active_id {
+            if Some(self.id) == active_id {
                 page_store.position(self.id)
             } else {
                 None

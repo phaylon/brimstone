@@ -11,6 +11,7 @@ use page_store;
 use app_action;
 use status_bar;
 use page_bar;
+use page_context_menu;
 
 pub struct Data {
     pub application: gtk::Application,
@@ -30,6 +31,8 @@ pub struct Data {
     pub page_bar: rc::Rc<page_bar::Bar>,
     pub bar_size_group: gtk::SizeGroup,
     pub select_ignore: cell::Cell<bool>,
+    pub page_context_menu: rc::Rc<page_context_menu::Map>,
+    pub page_tree_target: cell::Cell<Option<page_store::Id>>,
 }
 
 impl Data {
@@ -81,6 +84,14 @@ impl Handle {
         *data.active_webview.borrow_mut() = Some(view);
     }
 
+    pub fn set_page_tree_target(&self, target: Option<page_store::Id>) {
+        self.data.upgrade().map(|data| data.page_tree_target.set(target));
+    }
+
+    pub fn get_page_tree_target(&self) -> Option<page_store::Id> {
+        self.data.upgrade().and_then(|data| data.page_tree_target.get())
+    }
+
     pub fn is_active(&self, id: page_store::Id) -> bool {
         let data = match self.data.upgrade() {
             Some(data) => data,
@@ -128,6 +139,10 @@ impl Handle {
 
     pub fn window(&self) -> Option<gtk::ApplicationWindow> {
         self.data.upgrade().map(|data| data.window.clone())
+    }
+
+    pub fn page_context_menu(&self) -> Option<rc::Rc<page_context_menu::Map>> {
+        self.data.upgrade().map(|data| data.page_context_menu.clone())
     }
 
     pub fn view_space(&self) -> Option<gtk::Box> {

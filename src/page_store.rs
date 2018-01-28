@@ -284,6 +284,10 @@ impl Store {
         None
     }
 
+    pub fn try_get_view(&self, id: Id) -> Option<webkit2gtk::WebView> {
+        self.map_entry(id, |entry| entry.view.clone()).and_then(|view| view)
+    }
+
     pub fn get_view(&self, id: Id, app: &app::Handle) -> Option<webkit2gtk::WebView> {
         use webkit2gtk::{ WebViewExt };
 

@@ -23,6 +23,8 @@ pub mod status_bar;
 pub mod mouse;
 pub mod page_bar;
 pub mod bar;
+pub mod menu;
+pub mod page_context_menu;
 
 use std::rc;
 use std::cell;
@@ -135,6 +137,8 @@ fn setup(app: &gtk::Application, app_space: &rc::Rc<cell::RefCell<Option<app::Ap
         page_bar: rc::Rc::new(page_bar::create()),
         bar_size_group: gtk::SizeGroup::new(gtk::SizeGroupMode::Vertical),
         select_ignore: cell::Cell::new(false),
+        page_context_menu: rc::Rc::new(page_context_menu::create()),
+        page_tree_target: cell::Cell::new(None),
     });
 
     window::setup(app.handle());
@@ -144,6 +148,7 @@ fn setup(app: &gtk::Application, app_space: &rc::Rc<cell::RefCell<Option<app::Ap
     app_action::setup(app.handle());
     status_bar::setup(app.handle());
     page_bar::setup(app.handle());
+    page_context_menu::setup(app.handle());
 
     window::present(&app);
 
