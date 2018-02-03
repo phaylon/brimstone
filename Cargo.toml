@@ -9,6 +9,7 @@ gio = "*"
 gdk = "*"
 pango = "*"
 cairo-rs = "*"
+rusqlite = "*"
 
 [dependencies.webkit2gtk]
 version = "*"

@@ -1,45 +1,184 @@
 
 use std::rc;
 use std::cell;
+use std::cmp;
 
 use gtk;
 use webkit2gtk;
 use cairo;
+use pango;
 
 use webview;
 use app;
 use page_tree_store;
+use session;
 
 pub type Id = u32;
 
-pub fn create() -> rc::Rc<Store> {
-    rc::Rc::new(Store::new())
-}
+const TITLE_WEIGHT_DEFAULT: i32 = 400;
+const TITLE_WEIGHT_UNREAD: i32 = 600;
 
 #[derive(Debug, Clone, Copy)]
 pub struct LoadState {
     pub can_go_back: bool,
     pub can_go_forward: bool,
     pub is_loading: bool,
+    pub tls_state: TlsState,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum TlsState {
+    Insecure,
+    SelfSigned,
+    Encrypted,
 }
 
 pub struct Store {
     last_id: cell::Cell<Id>,
     entries: rc::Rc<cell::RefCell<Vec<Entry>>>,
+    pinned: cell::RefCell<Vec<Id>>,
     tree_store: gtk::TreeStore,
+}
+
+pub fn setup(app: app::Handle) {}
+
+fn recalc(tree_store: &gtk::TreeStore, iter: &gtk::TreeIter) {
+    use gtk::{ TreeModelExt, Cast };
+
+    let model = tree_store.clone().upcast();
+    
+    let mut sum = 0;
+    for index in 0..tree_store.iter_n_children(iter) {
+        let child_iter = tree_store.iter_nth_child(iter, index).unwrap();
+        sum += 1 + page_tree_store::get::child_count(&model, &child_iter);
+    }
+
+    page_tree_store::set::child_count(tree_store, iter, sum);
+    page_tree_store::set::has_children(tree_store, iter, sum > 0);
+    page_tree_store::set::child_info(tree_store, iter, format!("({})", sum));
+
+    if let Some(parent_iter) = tree_store.iter_parent(iter) {
+        recalc(tree_store, &parent_iter);
+    }
 }
 
 impl Store {
 
-    pub fn new() -> Store {
+    pub fn from_session(session: &mut session::Storage) -> Store {
+
+        fn populate(
+            parent: Option<&gtk::TreeIter>,
+            children: &session::Nodes,
+            entries: &mut Vec<Entry>,
+            tree_store: &gtk::TreeStore,
+        ) {
+            for child in children {
+                let info = child.borrow().info.clone().unwrap_or_else(|| session::NodeInfo {
+                    title: Some(String::new()),
+                    uri: String::new(),
+                    is_pinned: false,
+                });
+                let session::NodeInfo { title, uri, is_pinned } = info;
+                entries.push(Entry {
+                    id: child.borrow().id,
+                    uri: uri.clone(),
+                    title: title.clone(),
+                    view: None,
+                    favicon: None,
+                    is_noclose: false,
+                    is_pinned: is_pinned,
+                    load_state: LoadState {
+                        can_go_back: false,
+                        can_go_forward: false,
+                        is_loading: false,
+                        tls_state: TlsState::Insecure,
+                    },
+                });
+                let iter = page_tree_store::insert(
+                    tree_store,
+                    parent.map(|iter| iter.clone()),
+                    None,
+                    page_tree_store::Entry {
+                        id: child.borrow().id,
+                        title: title.unwrap_or_else(|| uri),
+                        child_info: "".into(),
+                        has_children: false,
+                        child_count: 0,
+                        style: pango::Style::Italic,
+                        weight: TITLE_WEIGHT_DEFAULT,
+                        is_pinned: is_pinned,
+                    },
+                );
+                populate(Some(&iter), &child.borrow().children, entries, tree_store);
+                recalc(tree_store, &iter);
+            }
+        }
+
+        let last_id = session.find_highest_id().checked_add(1).unwrap();
+        let pinned = session.find_pinned_ids();
+        let tree = session.load_tree().unwrap();
+
+        let mut entries = Vec::new();
+        let tree_store = page_tree_store::create();
+
+        populate(None, &tree, &mut entries, &tree_store);
+
         Store {
-            last_id: cell::Cell::new(0),
-            entries: rc::Rc::new(cell::RefCell::new(Vec::new())),
-            tree_store: page_tree_store::create(),
+            last_id: cell::Cell::new(last_id),
+            entries: rc::Rc::new(cell::RefCell::new(entries)),
+            tree_store,
+            pinned: cell::RefCell::new(pinned),
         }
     }
 
+    pub fn pinned_count(&self) -> usize { self.pinned.borrow().len() }
+
     pub fn tree_store(&self) -> &gtk::TreeStore { &self.tree_store }
+
+    pub fn set_unread(&self, id: Id) {
+        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
+        page_tree_store::set::weight(&self.tree_store, &iter, TITLE_WEIGHT_UNREAD);
+    }
+
+    pub fn set_read(&self, id: Id) {
+        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
+        page_tree_store::set::weight(&self.tree_store, &iter, TITLE_WEIGHT_DEFAULT);
+    }
+
+    pub fn set_pinned(&self, session: &session::Updater, id: Id, is_pinned: bool) {
+        use gtk::{ TreeModelExt };
+
+        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
+        let old_parent = self.tree_store.iter_parent(&iter);
+
+        self.map_entry_mut(id, |entry| entry.is_pinned = is_pinned);
+        page_tree_store::set::is_pinned(&self.tree_store, &iter, is_pinned);
+        let count = self.pinned.borrow().len();
+        if is_pinned {
+            self.move_to(id, None, count as i32);
+            self.pinned.borrow_mut().push(id);
+        } else {
+            self.move_to(id, None, count as i32);
+            self.pinned.borrow_mut().retain(|pinned_id| *pinned_id != id);
+        }
+        session.update_tree(&self.tree_store);
+        session.update_is_pinned(id, is_pinned);
+        if let Some(old_parent) = old_parent {
+            self.recalc(&old_parent);
+        }
+    }
+
+    pub fn get_pinned(&self, id: Id) -> bool {
+        self.map_entry(id, |entry| entry.is_pinned).unwrap_or(false)
+    }
+
+    pub fn get_noclose(&self, id: Id) -> bool {
+        self.map_entry(id, |entry| entry.is_noclose).unwrap_or(false)
+    }
+
+    pub fn set_noclose(&self, id: Id, is_noclose: bool) {
+        self.map_entry_mut(id, |entry| entry.is_noclose = is_noclose);
+    }
 
     pub fn get_count(&self) -> usize { self.entries.borrow().len() }
 
@@ -69,12 +208,11 @@ impl Store {
             None => return None,
         };
         let child_id: Id = page_tree_store::get::id(&model, &child_iter);
-        let child_title: String = page_tree_store::get::title(&model, &child_iter);
         Some(child_id)
     }
 
     pub fn has_children(&self, id: Id) -> Option<i32> {
-        use gtk::{ TreeModelExt, Cast };
+        use gtk::{ TreeModelExt };
 
         let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
         let count = self.tree_store.iter_n_children(Some(&iter));
@@ -120,7 +258,7 @@ impl Store {
         None
     }
 
-    fn children(&self, parent: Option<&gtk::TreeIter>) -> Vec<(Id, gtk::TreeIter)> {
+    pub fn children(&self, parent: Option<&gtk::TreeIter>) -> Vec<(Id, gtk::TreeIter)> {
         use gtk::{ TreeModelExt, Cast };
 
         let model: gtk::TreeModel = self.tree_store.clone().upcast();
@@ -134,20 +272,22 @@ impl Store {
         children
     }
 
-    pub fn close(&self, id: Id, close_children: bool) {
-        use gtk::{ Cast, TreeStoreExt, TreeModelExt, ContainerExt, WidgetExt };
+    pub fn close(&self, session: &session::Updater, id: Id, close_children: bool) {
+        use gtk::{ Cast, TreeStoreExt, ContainerExt, WidgetExt, TreeModelExt };
 
         fn deep_close(
+            session: &session::Updater,
             page_store: &Store,
             model: &gtk::TreeModel,
             store: &gtk::TreeStore,
             iter: &gtk::TreeIter,
         ) {
             let id: Id = page_tree_store::get::id(&model, &iter);
-            for (child_id, child_iter) in page_store.children(Some(iter)) {
-                deep_close(page_store, model, store, &child_iter);
+            for (_child_id, child_iter) in page_store.children(Some(iter)) {
+                deep_close(session, page_store, model, store, &child_iter);
             }
             store.remove(iter);
+            session.update_remove(id);
             let mut entries = page_store.entries.borrow_mut();
             let index = entries.iter().position(|entry| entry.id == id).unwrap();
             let entry = entries.remove(index);
@@ -176,7 +316,7 @@ impl Store {
             let (curr_parent, curr_position) = try_extract!(self.position(id));
             let children = self.children(Some(&iter));
             for child_index in 0..children.len() {
-                let &(child_id, ref child_iter) = &children[child_index];
+                let &(child_id, _) = &children[child_index];
                 self.move_to(
                     child_id,
                     curr_parent,
@@ -184,29 +324,50 @@ impl Store {
                 );
             }
         }
-        deep_close(self, &model, &self.tree_store, &iter);
+
+        let parent_iter = self.tree_store.iter_parent(&iter);
+
+        deep_close(session, self, &model, &self.tree_store, &iter);
+        session.update_tree(&self.tree_store);
+
+        if let Some(parent_iter) = parent_iter {
+            self.recalc(&parent_iter);
+        }
     }
 
-    pub fn move_to(&self, id: Id, parent: Option<Id>, position: i32) {
+    fn move_iter_to(
+        &self,
+        iter: gtk::TreeIter,
+        parent_iter: Option<&gtk::TreeIter>,
+        position: i32,
+    ) {
         use gtk::{ TreeStoreExt, TreeModelExt, TreeStoreExtManual };
-        
-        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
 
         let mut values = Vec::new();
         for column in 0..self.tree_store.get_n_columns() {
             values.push(self.tree_store.get_value(&iter, column));
         }
-
+        
+        let new_iter = self.tree_store.insert(parent_iter, position);
+        let mut child_index = 0;
+        for (_, child_iter) in self.children(Some(&iter)) {
+            self.move_iter_to(child_iter, Some(&new_iter), child_index);
+            child_index += 1;
+        }
         self.tree_store.remove(&iter);
 
+        for column in 0..values.len() {
+            self.tree_store.set_value(&new_iter, column as u32, &values[column]);
+        }
+    }
+
+    pub fn move_to(&self, id: Id, parent: Option<Id>, position: i32) {
+
+        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
         let parent_iter = parent
             .map(|id| page_tree_store::find_iter_by_id(&self.tree_store, id).unwrap());
 
-        let iter = self.tree_store.insert(parent_iter.as_ref(), position);
-
-        for column in 0..values.len() {
-            self.tree_store.set_value(&iter, column as u32, &values[column]);
-        }
+        self.move_iter_to(iter, parent_iter.as_ref(), position);
     }
 
     pub fn get_uri(&self, id: Id) -> Option<String> {
@@ -235,12 +396,14 @@ impl Store {
         }
     }
 
-    pub fn set_uri(&self, id: Id, value: String) {
+    pub fn set_uri(&self, session: &session::Updater, id: Id, value: String) {
+        session.update_uri(id, value.clone());
         self.map_entry_mut(id, |entry| entry.uri = value);
         self.update_tree_title(id);
     }
 
-    pub fn set_title(&self, id: Id, value: Option<String>) {
+    pub fn set_title(&self, session: &session::Updater, id: Id, value: Option<String>) {
+        session.update_title(id, value.clone().unwrap_or_else(|| String::new()));
         self.map_entry_mut(id, |entry| entry.title = value);
         self.update_tree_title(id);
     }
@@ -303,22 +466,21 @@ impl Store {
         new_view.load_uri(&uri);
         let ret_view = new_view.clone();
         self.map_entry_mut(id, move |entry| entry.view = Some(new_view));
+        let iter = page_tree_store::find_iter_by_id(&self.tree_store, id).unwrap();
+        page_tree_store::set::style(&self.tree_store, &iter, pango::Style::Normal);
         Some(ret_view)
     }
 
     fn find_next_id(&self) -> Id {
-        let mut id = self.last_id.get();
-        loop {
-            id = id.wrapping_add(1);
-            if self.contains(id) {
-                continue;
-            }
-            self.last_id.set(id);
-            return id;
-        }
+        let id = self.last_id.get();
+        let next_id = id.checked_add(1).expect("left-over id space");
+        self.last_id.set(next_id);
+        next_id
     }
 
-    pub fn insert(&self, data: InsertData) -> Option<Id> {
+    pub fn insert(&self, session: &session::Updater, data: InsertData) -> Option<Id> {
+        use gtk::{ TreeModelExt };
+
         let id = self.find_next_id();
         let parent_iter = match data.parent {
             Some(parent_id) => Some(try_extract!(page_tree_store::find_iter_by_id(
@@ -329,60 +491,63 @@ impl Store {
         };
         self.entries.borrow_mut().push(Entry {
             id,
-            uri: data.uri,
+            uri: data.uri.clone(),
             title: data.title.clone(),
             view: None,
             favicon: None,
+            is_noclose: false,
+            is_pinned: false,
             load_state: LoadState {
                 can_go_back: false,
                 can_go_forward: false,
                 is_loading: false,
+                tls_state: TlsState::Insecure,
             },
         });
-        let position = match data.position {
-            InsertPosition::Start => Some(0),
-            InsertPosition::End => None,
-            InsertPosition::Before(id) =>
-                page_tree_store::find_position(&self.tree_store, id, data.parent),
-            InsertPosition::After(id) =>
-                page_tree_store::find_position(&self.tree_store, id, data.parent)
-                    .map(|pos| pos + 1),
+        let position = {
+            let end_index = self.tree_store.iter_n_children(parent_iter.as_ref()) as u32;
+            let mut position = match data.position {
+                InsertPosition::Start => 0,
+                InsertPosition::End => end_index,
+                InsertPosition::Before(id) =>
+                    page_tree_store::find_position(&self.tree_store, id, data.parent)
+                        .unwrap_or(end_index),
+                InsertPosition::After(id) =>
+                    page_tree_store::find_position(&self.tree_store, id, data.parent)
+                        .map(|pos| pos + 1)
+                        .unwrap_or(end_index),
+            };
+            if parent_iter.is_none() {
+                let pin_count = self.pinned.borrow().len() as u32;
+                position = cmp::max(position, pin_count);
+            }
+            position
         };
+        let title = data.title.unwrap_or_else(|| String::new());
         page_tree_store::insert(
             &self.tree_store,
-            parent_iter,
-            position,
+            parent_iter.clone(),
+            Some(position),
             page_tree_store::Entry {
                 id,
-                title: data.title.unwrap_or_else(|| String::new()),
+                title: title.clone(),
+                child_info: "".into(),
+                has_children: false,
+                child_count: 0,
+                style: pango::Style::Italic,
+                weight: TITLE_WEIGHT_DEFAULT,
+                is_pinned: false,
             },
         );
+        session.update_create(id, data.uri, data.parent, position);
+        if let Some(ref iter) = parent_iter {
+            self.recalc(iter);
+        }
         Some(id)
     }
 
-    pub fn add(&self, uri: String, title: Option<String>) -> Id {
-        let mut id = self.last_id.get();
-        loop {
-            id = id.wrapping_add(1);
-            if self.contains(id) {
-                continue;
-            }
-            let view = None;
-            self.entries.borrow_mut().push(Entry {
-                id,
-                uri,
-                title,
-                view,
-                favicon: None,
-                load_state: LoadState {
-                    can_go_back: false,
-                    can_go_forward: false,
-                    is_loading: false,
-                },
-            });
-            self.last_id.set(id);
-            return id;
-        }
+    fn recalc(&self, iter: &gtk::TreeIter) {
+        recalc(&self.tree_store, iter);
     }
 
     pub fn contains(&self, id: Id) -> bool {
@@ -411,4 +576,6 @@ struct Entry {
     view: Option<webkit2gtk::WebView>,
     load_state: LoadState,
     favicon: Option<cairo::Surface>,
+    is_pinned: bool,
+    is_noclose: bool,
 }

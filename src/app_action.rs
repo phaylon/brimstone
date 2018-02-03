@@ -4,7 +4,6 @@ use gio;
 use app;
 use action;
 use page_store;
-use page_tree_store;
 use page_tree_view;
 
 const ACCEL_RELOAD: &str = "<ctrl>r";
@@ -56,7 +55,6 @@ pub fn create() -> Map {
 }
 
 fn create_menu_bar() -> gio::Menu {
-    use gio::{ MenuExt, MenuItemExt };
     use menu;
 
     menu::build(|menu| {
@@ -81,7 +79,6 @@ fn create_menu_bar() -> gio::Menu {
 
 pub fn setup(app: app::Handle) {
     use gtk::{ GtkApplicationExt, WidgetExt, GtkWindowExt };
-    use gio::{ SimpleActionExt, ActionMapExt };
     use webkit2gtk::{ WebViewExt };
     use menu;
 
@@ -119,7 +116,6 @@ pub fn setup(app: app::Handle) {
         webview.stop_loading();
     });
     menu::setup_action(&app, &app_actions.new_page_action, true, |app| {
-        use gtk::{ TreeViewExt, TreeSelectionExt };
 
         let page_store = try_extract!(app.page_store());
         let page_tree_store = try_extract!(app.page_tree_store());

@@ -1,4 +1,6 @@
 
+use gtk;
+
 use app;
 use page_store;
 use action;
@@ -40,6 +42,7 @@ impl app::Perform for Close {
         let page_store = try_extract!(app.page_store());
         let page_tree_view = try_extract!(app.page_tree_view());
         let window = try_extract!(app.window());
+        let session = try_extract!(app.session_updater());
 
         let close_children =
             if let Some(close_children) = self.close_children {
@@ -94,7 +97,7 @@ impl app::Perform for Close {
                 None
             };
 
-        app.without_select(|| page_store.close(self.id, close_children));
+        app.without_select(|| page_store.close(&session, self.id, close_children));
         
         if let Some(select) = select {
             page_tree_view.get_selection().unselect_all();
@@ -120,7 +123,8 @@ impl app::Perform for Create {
         let Create { uri, title, parent, position } = self;
 
         let page_store = try_extract!(app.page_store());
-        let result = page_store.insert(page_store::InsertData {
+        let session = try_extract!(app.session_updater());
+        let result = page_store.insert(&session, page_store::InsertData {
             uri,
             title,
             parent,
@@ -142,7 +146,7 @@ impl app::Perform for Select {
     type Result = ();
 
     fn perform(self, app: &app::Handle) {
-        use gtk::{ ContainerExt, WidgetExt, BoxExt, EntryExt };
+        use gtk::{ WidgetExt, BoxExt, EntryExt };
 
         if app.is_select_ignored() {
             return;
@@ -155,6 +159,8 @@ impl app::Perform for Select {
         let new_view = try_extract!(page_store.get_view(self.id, app));
         let title = page_store.get_title(self.id);
         let uri = page_store.get_uri(self.id);
+
+        page_store.set_read(self.id);
 
         match app.active_webview() {
             Some(webview) => webview.hide(),
@@ -207,7 +213,7 @@ impl app::Perform for AdjustUi {
     type Result = ();
     
     fn perform(self, app: &app::Handle) {
-        use gtk::{ WidgetExt };
+        use gtk::{ WidgetExt, EntryExt };
         use gio::{ SimpleActionExt };
 
         let nav_bar = try_extract!(app.navigation_bar());
@@ -215,6 +221,18 @@ impl app::Perform for AdjustUi {
 
         nav_bar.reload_button().set_visible(!self.state.is_loading);
         nav_bar.stop_button().set_visible(self.state.is_loading);
+
+        let (tls_icon, tls_tooltip) = match self.state.tls_state {
+            page_store::TlsState::Encrypted =>
+                ("security-high", "Security: Encrypted"),
+            page_store::TlsState::SelfSigned =>
+                ("security-medium", "Security: Self-Signed"),
+            page_store::TlsState::Insecure =>
+                ("security-low", "Security: Insecure"),
+        };
+        let address_entry = nav_bar.address_entry();
+        address_entry.set_icon_from_icon_name(gtk::EntryIconPosition::Primary, tls_icon);
+        address_entry.set_icon_tooltip_text(gtk::EntryIconPosition::Primary, tls_tooltip);
 
         app_actions.go_back_action.set_enabled(self.state.can_go_back);
         app_actions.go_forward_action.set_enabled(self.state.can_go_forward);

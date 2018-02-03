@@ -35,7 +35,7 @@ pub fn create() -> Bar {
 }
 
 pub fn setup(app: app::Handle) {
-    use gtk::{ BoxExt, EntryExt, WidgetExt, ActionableExt, SizeGroupExt };
+    use gtk::{ BoxExt, ActionableExt, SizeGroupExt };
 
     let bar = app.page_bar().unwrap().bar;
     bar.container.pack_start(&bar.add_page_button, false, true, 0);

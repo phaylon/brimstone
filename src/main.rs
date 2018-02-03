@@ -6,6 +6,7 @@ extern crate glib;
 extern crate cairo;
 extern crate pango;
 extern crate webkit2gtk;
+extern crate rusqlite;
 
 #[macro_use] mod macros;
 
@@ -25,6 +26,7 @@ pub mod page_bar;
 pub mod bar;
 pub mod menu;
 pub mod page_context_menu;
+pub mod session;
 
 use std::rc;
 use std::cell;
@@ -34,6 +36,12 @@ mod_tree_store! {
     struct {
         id: ::page_store::Id,
         title: String,
+        child_info: String,
+        has_children: bool,
+        child_count: u32,
+        style: ::pango::Style,
+        weight: i32,
+        is_pinned: bool,
     }
     pub fn find_position(
         store: &gtk::TreeStore,
@@ -119,6 +127,12 @@ fn main() {
 
 fn setup(app: &gtk::Application, app_space: &rc::Rc<cell::RefCell<Option<app::Application>>>) {
 
+    let mut session_storage = session::Storage::open_or_create("_profile/config/session.db")
+        .unwrap();
+
+    let page_store = page_store::Store::from_session(&mut session_storage);
+    let count = page_store.get_count();
+
     let app = app::Application::new(app::Data {
         application: app.clone(),
         window: window::create(app),
@@ -128,7 +142,7 @@ fn setup(app: &gtk::Application, app_space: &rc::Rc<cell::RefCell<Option<app::Ap
         view_space: gtk::Box::new(gtk::Orientation::Horizontal, 0),
         web_context: webview::create_web_context(),
         user_content_manager: webview::create_user_content_manager(),
-        page_store: page_store::create(),
+        page_store: rc::Rc::new(page_store),
         active_page_store_id: rc::Rc::new(cell::Cell::new(None)),
         active_webview: rc::Rc::new(cell::RefCell::new(None)),
         app_actions: rc::Rc::new(app_action::create()),
@@ -139,6 +153,8 @@ fn setup(app: &gtk::Application, app_space: &rc::Rc<cell::RefCell<Option<app::Ap
         select_ignore: cell::Cell::new(false),
         page_context_menu: rc::Rc::new(page_context_menu::create()),
         page_tree_target: cell::Cell::new(None),
+        cached_nav_menu: cell::RefCell::new(None),
+        session_updater: rc::Rc::new(session::Updater::new(session_storage)),
     });
 
     window::setup(app.handle());
@@ -149,27 +165,32 @@ fn setup(app: &gtk::Application, app_space: &rc::Rc<cell::RefCell<Option<app::Ap
     status_bar::setup(app.handle());
     page_bar::setup(app.handle());
     page_context_menu::setup(app.handle());
+    page_store::setup(app.handle());
+
+    app.handle().perform(action::page::UpdateCounter);
 
     window::present(&app);
 
-    let prev = app.handle().perform(::action::page::Create {
-        title: Some("Test Crates".into()),
-        uri: "https://crates.io".into(),
-        parent: None,
-        position: page_store::InsertPosition::Start,
-    }).unwrap();
-    let _prev = app.handle().perform(::action::page::Create {
-        title: Some("Test Rust".into()),
-        uri: "https://www.rust-lang.org".into(),
-        parent: None,
-        position: page_store::InsertPosition::After(prev),
-    }).unwrap();
-    app.handle().perform(::action::page::Create {
-        title: Some("Test Youtube".into()),
-        uri: "https://www.youtube.com".into(),
-        parent: None,
-        position: page_store::InsertPosition::End,
-    });
+    if count == 0 {
+        let prev = app.handle().perform(::action::page::Create {
+            title: Some("Test Crates".into()),
+            uri: "https://crates.io".into(),
+            parent: None,
+            position: page_store::InsertPosition::Start,
+        }).unwrap();
+        let _prev = app.handle().perform(::action::page::Create {
+            title: Some("Test Rust".into()),
+            uri: "https://www.rust-lang.org".into(),
+            parent: Some(prev),
+            position: page_store::InsertPosition::After(prev),
+        }).unwrap();
+        app.handle().perform(::action::page::Create {
+            title: Some("Test Youtube".into()),
+            uri: "https://www.youtube.com".into(),
+            parent: None,
+            position: page_store::InsertPosition::End,
+        });
+    }
 
     *app_space.borrow_mut() = Some(app);
 }

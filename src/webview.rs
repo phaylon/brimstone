@@ -13,19 +13,20 @@ fn on_property_uri_notify(
     id: page_store::Id,
     view: &webkit2gtk::WebView,
 ) {
-    use webkit2gtk::{ WebViewExtManual, WebViewExt };
-    use gtk::{ EntryExt, Cast };
+    use webkit2gtk::{ WebViewExt };
+    use gtk::{ EntryExt };
 
     let uri = view.get_uri().unwrap_or_else(|| "".into());
 
     let page_store = try_extract!(app.page_store());
     let nav_bar = try_extract!(app.navigation_bar());
+    let session = try_extract!(app.session_updater());
 
     if app.is_active(id) {
         nav_bar.address_entry().set_text(&uri);
     }
 
-    page_store.set_uri(id, uri);
+    page_store.set_uri(&session, id, uri);
 }
 
 fn on_property_title_notify(
@@ -33,20 +34,22 @@ fn on_property_title_notify(
     id: page_store::Id,
     view: &webkit2gtk::WebView,
 ) {
-    use webkit2gtk::{ WebViewExtManual, WebViewExt };
-    use gtk::{ EntryExt, Cast };
+    use webkit2gtk::{ WebViewExt };
 
     let title = view.get_title();
     let uri = view.get_uri();
 
     let page_store = try_extract!(app.page_store());
+    let session = try_extract!(app.session_updater());
 
-    page_store.set_title(id, title.clone());
+    page_store.set_title(&session, id, title.clone());
     if app.is_active(id) {
         app.perform(action::window::SetTitle {
             title: title.as_ref().map(|title| &title[..]),
             uri: uri.as_ref().map(|uri| &uri[..]).unwrap_or(""),
         });
+    } else {
+        page_store.set_unread(id);
     }
 }
 
@@ -57,14 +60,13 @@ fn on_decide_policy(
     pol_decision: &webkit2gtk::PolicyDecision,
     pol_type: webkit2gtk::PolicyDecisionType,
 ) -> bool {
-    use webkit2gtk::{ WebViewExtManual, WebViewExt };
-    use gtk::{ EntryExt, Cast };
+    use gtk::{ Cast };
     use webkit2gtk::{ NavigationPolicyDecisionExt, PolicyDecisionExt, URIRequestExt };
 
     fn handle_middle_click(
         app: &app::Handle,
         id: page_store::Id,
-        view: &webkit2gtk::WebView,
+        _view: &webkit2gtk::WebView,
         pol_decision: &webkit2gtk::PolicyDecision,
         pol_type: webkit2gtk::PolicyDecisionType,
     ) -> bool {
@@ -96,7 +98,7 @@ fn on_decide_policy(
             None => false,
             Some(nav_action) => match gdk::ModifierType::from_bits(nav_action.get_modifiers()) {
                 Some(modifiers) => modifiers.contains(gdk::ModifierType::SHIFT_MASK),
-                none => false,
+                None => false,
             },
         };
 
@@ -130,14 +132,37 @@ fn on_load_changed(
     app: &app::Handle,
     id: page_store::Id,
     view: &webkit2gtk::WebView,
+    _change: webkit2gtk::LoadEvent,
 ) {
-    use webkit2gtk::{ WebViewExtManual, WebViewExt };
+    use webkit2gtk::{ WebViewExt };
+    use gio::{ TlsCertificateExt };
+
+    let is_loading = view.is_loading();
+
+    let tls_state = if !is_loading {
+        match view.get_tls_info() {
+            None => page_store::TlsState::Insecure,
+            Some((cert, flags)) => if flags.is_empty() {
+                if cert.get_issuer().is_some() {
+                    page_store::TlsState::Encrypted
+                } else {
+                    page_store::TlsState::SelfSigned
+                }
+            } else {
+                page_store::TlsState::Insecure
+            },
+        }
+    } else {
+        page_store::TlsState::Insecure
+    };
 
     let state = page_store::LoadState {
         can_go_forward: view.can_go_forward(),
         can_go_back: view.can_go_back(),
-        is_loading: view.is_loading(),
+        is_loading,
+        tls_state,
     };
+
     app.perform(action::page::LoadStateChange {
         id,
         state,
@@ -146,8 +171,8 @@ fn on_load_changed(
 
 fn on_mouse_target_changed(
     app: &app::Handle,
-    id: page_store::Id,
-    view: &webkit2gtk::WebView,
+    _id: page_store::Id,
+    _view: &webkit2gtk::WebView,
     hit: &webkit2gtk::HitTestResult,
 ) {
     use webkit2gtk::{ HitTestResultExt };
@@ -158,7 +183,6 @@ fn on_mouse_target_changed(
 
 pub fn create(id: page_store::Id, app: &app::Handle) -> webkit2gtk::WebView {
     use webkit2gtk::{ WebViewExtManual, WebViewExt };
-    use gtk::{ EntryExt, Cast };
 
     let new_view = webkit2gtk::WebView::new_with_context_and_user_content_manager(
         &try_extract!(app.web_context()),
@@ -181,8 +205,8 @@ pub fn create(id: page_store::Id, app: &app::Handle) -> webkit2gtk::WebView {
         on_mouse_target_changed(&app, id, view, hit);
     }));
 
-    new_view.connect_load_changed(with_cloned!(app, move |view, _change| {
-        on_load_changed(&app, id, view);
+    new_view.connect_load_changed(with_cloned!(app, move |view, change| {
+        on_load_changed(&app, id, view, change);
     }));
 
     new_view
@@ -195,6 +219,7 @@ pub fn create_web_context() -> webkit2gtk::WebContext {
     let web_context = webkit2gtk::WebContext::get_default().unwrap();
     web_context.set_web_extensions_initialization_user_data(&"webkit".to_variant());
     web_context.set_web_extensions_directory("../webkit2gtk-webextension-rs/example/target/debug/");
+    web_context.set_tls_errors_policy(webkit2gtk::TLSErrorsPolicy::Fail);
 
     web_context
 }
