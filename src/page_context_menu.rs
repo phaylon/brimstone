@@ -96,8 +96,8 @@ pub fn create() -> Map {
 }
 
 pub fn setup(app: app::Handle) {
-    use gtk::{ MenuExt, ToVariant };
-    use gio::{ ActionExt, SimpleActionExt };
+    use gtk::{ MenuExt };
+    use gio::{ ActionExt };
 
     let map = try_extract!(app.page_context_menu());
     map.menu().set_property_attach_widget(Some(&try_extract!(app.page_tree_view())));
@@ -111,7 +111,6 @@ pub fn setup(app: app::Handle) {
 
     menu::setup_win_action(&app, &map.pin_action, true, |app, action| {
         let page_store = try_extract!(app.page_store());
-        let session = try_extract!(app.session_updater());
         let id = try_extract!(app.get_page_tree_target());
         let is_active: bool =
             if let Some(state) = action.get_state() {
@@ -120,7 +119,7 @@ pub fn setup(app: app::Handle) {
                 false
             };
         let is_active = !is_active;
-        page_store.set_pinned(&session, id, is_active);
+        page_store.set_pinned(id, is_active);
     });
 
     menu::setup_win_action(&app, &map.duplicate_action, true, |app, _| {

@@ -49,6 +49,7 @@ impl From<OpenStorageError> for OpenOrCreateStorageError {
 }
 
 fn init_storage(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
+    log_debug!("initializing storage");
     conn.execute("
         CREATE TABLE page_info (
             id INTEGER PRIMARY KEY,
@@ -123,6 +124,7 @@ impl IdSeq {
 }
 
 fn get_info_rows(conn: &rusqlite::Connection) -> Result<InfoRows, rusqlite::Error> {
+    log_trace!("loading page info data");
     let mut stmt = conn.prepare("SELECT id, title, uri, is_pinned FROM page_info")?;
     let mut rows = stmt.query(&[])?;
     let mut info = Vec::new();
@@ -135,10 +137,12 @@ fn get_info_rows(conn: &rusqlite::Connection) -> Result<InfoRows, rusqlite::Erro
             is_pinned: row.get::<_, Option<bool>>(3).unwrap_or(false),
         });
     }
+    log_trace!("found {} page info row(s)", info.len());
     Ok(info)
 }
 
 fn get_tree_rows(conn: &rusqlite::Connection) -> Result<TreeRows, rusqlite::Error> {
+    log_trace!("loading page tree data");
     let mut stmt = conn.prepare("SELECT id, parent, position FROM page_tree")?;
     let mut rows = stmt.query(&[])?;
     let mut tree = Vec::new();
@@ -150,6 +154,7 @@ fn get_tree_rows(conn: &rusqlite::Connection) -> Result<TreeRows, rusqlite::Erro
             position: row.get(2),
         });
     }
+    log_trace!("found {} page tree row(s)", tree.len());
     Ok(tree)
 }
 
@@ -187,7 +192,6 @@ fn insert_nodes(
                 &info.title,
                 &info.uri,
                 &info.is_pinned,
-//                &if info.is_pinned { 1 } else { 0 },
             ])?,
             None => tx.execute(insert_sql, &[
                 &id,
@@ -220,10 +224,12 @@ fn find_pinned_ids(info: &InfoRows) -> Vec<page_store::Id> {
             pinned.push(row.id);
         }
     }
+    log_trace!("found pinned: {:?}", &pinned);
     pinned
 }
 
 fn inflate_tree(nodes: &ParentMap, pinned: &[page_store::Id]) -> Nodes {
+    log_trace!("inflating tree from {} node(s)", nodes.len());
     let mut roots = Vec::new();
     'nodes: for &(parent, ref node) in nodes {
         if let Some(parent) = parent {
@@ -240,17 +246,19 @@ fn inflate_tree(nodes: &ParentMap, pinned: &[page_store::Id]) -> Nodes {
             roots.push(node.clone());
         }
     }
+    log_trace!("found {} root node(s)", roots.len());
     roots
 }
 
 fn attach_info_rows_to_nodes(nodes: &ParentMap, info: &mut InfoRows) {
+    log_trace!("attaching info to nodes");
     for &(_, ref node) in nodes {
         let id = node.borrow().id;
         let row = match extract(info, |row| row.id == id) {
             Some(row) => row,
             None => continue,
         };
-        let node = node.borrow_mut().info = Some(NodeInfo {
+        node.borrow_mut().info = Some(NodeInfo {
             title: row.title,
             uri: row.uri,
             is_pinned: row.is_pinned,
@@ -259,12 +267,14 @@ fn attach_info_rows_to_nodes(nodes: &ParentMap, info: &mut InfoRows) {
 }
 
 fn sort_node_children(nodes: &ParentMap) {
+    log_trace!("sorting node children");
     for &(_, ref node) in nodes {
         node.borrow_mut().children.sort_by_key(|child| child.borrow().position);
     }
 }
 
 fn sort_root_nodes(roots: &mut Nodes) {
+    log_trace!("sorting root nodes");
     roots.sort_by_key(|child| (
         if let Some(ref info) = child.borrow().info {
             if info.is_pinned { 0 } else { 1 }
@@ -276,6 +286,7 @@ fn sort_root_nodes(roots: &mut Nodes) {
 }
 
 fn repopulate(conn: &mut rusqlite::Connection, roots: &Nodes) -> Result<(), rusqlite::Error> {
+    log_trace!("repopulating corrected session");
     let tx = conn.transaction()?;
     tx.execute("DELETE FROM page_tree", &[])?;
     tx.execute("DELETE FROM page_info", &[])?;
@@ -285,11 +296,13 @@ fn repopulate(conn: &mut rusqlite::Connection, roots: &Nodes) -> Result<(), rusq
 }
 
 fn vacuum(conn: &mut rusqlite::Connection) -> Result<(), rusqlite::Error> {
+    log_trace!("vacuum");
     conn.execute("VACUUM", &[])?;
     Ok(())
 }
 
 fn load_nodes_to_tree(conn: &mut rusqlite::Connection) -> rusqlite::Result<Nodes> {
+    log_trace!("constructing tree");
     
     let mut info = get_info_rows(conn)?;
     let tree = get_tree_rows(conn)?;
@@ -302,16 +315,19 @@ fn load_nodes_to_tree(conn: &mut rusqlite::Connection) -> rusqlite::Result<Nodes
     sort_node_children(&nodes);
     sort_root_nodes(&mut roots);
 
+    log_trace!("tree construction complete");
     Ok(roots)
 }
 
 fn prepare_storage(conn: &mut rusqlite::Connection) -> rusqlite::Result<()> {
+    log_trace!("preparing storage for use");
 
     let roots = load_nodes_to_tree(conn)?;
 
     repopulate(conn, &roots)?;
     vacuum(conn)?;
 
+    log_trace!("storage preparation complete");
     Ok(())
 }
 
@@ -320,7 +336,9 @@ impl Storage {
     pub fn open_or_create<P>(path: P) -> Result<Storage, OpenOrCreateStorageError>
     where P: AsRef<path::Path> {
         let path = path.as_ref();
+        log_trace!("storage path {:?}", path);
         if path.exists() {
+            log_trace!("storage exists");
             if !path.is_file() {
                 return Err(OpenStorageError::File.into());
             }
@@ -332,6 +350,7 @@ impl Storage {
                 .map_err(OpenStorageError::Prepare)?;
             Ok(Storage { conn })
         } else {
+            log_trace!("storage does not exist");
             let parent = path
                 .parent()
                 .ok_or_else(|| CreateStorageError::InvalidPath(path.into()))?;
@@ -384,7 +403,9 @@ impl Storage {
                 0
             };
 
-        cmp::max(page_info_id, page_tree_id)
+        let highest = cmp::max(page_info_id, page_tree_id);
+        log_trace!("highest page id found is {}", highest);
+        highest
     }
 
     fn modify(&mut self) -> Result<Modify, rusqlite::Error> {
@@ -530,6 +551,7 @@ impl Updater {
 
     pub fn new(mut storage: Storage) -> Updater {
         let (sender, receiver) = sync::mpsc::channel();
+        log_debug!("lauching updater thread");
         let handle = Some(thread::spawn(move || {
             loop {
                 let update = match receiver.recv() {
@@ -553,14 +575,17 @@ impl Updater {
     }
 
     pub fn update_title(&self, id: page_store::Id, title: String) {
+        log_debug!("title update for {} to {:?}", id, &title);
         self.sender.send(Update::Title { id, title }).unwrap();
     }
 
     pub fn update_uri(&self, id: page_store::Id, uri: String) {
+        log_debug!("uri update for {} to {:?}", id, &uri);
         self.sender.send(Update::Uri { id, uri }).unwrap();
     }
 
     pub fn update_is_pinned(&self, id: page_store::Id, is_pinned: bool) {
+        log_debug!("pin state update for {} to {:?}", id, is_pinned);
         self.sender.send(Update::IsPinned { id, is_pinned }).unwrap();
     }
 
@@ -571,14 +596,17 @@ impl Updater {
         parent: Option<page_store::Id>,
         position: u32,
     ) {
+        log_debug!("creation update for {}", id);
         self.sender.send(Update::Create { id, uri, parent, position }).unwrap();
     }
 
     pub fn update_remove(&self, id: page_store::Id) {
+        log_debug!("removal update for {}", id);
         self.sender.send(Update::Remove { id }).unwrap();
     }
 
     pub fn update_tree(&self, page_tree_store: &gtk::TreeStore) {
+        log_debug!("tree structure update");
         self.sender.send(Update::Tree {
             tree: Tree::from_page_tree_store(page_tree_store),
         }).unwrap();
@@ -588,6 +616,7 @@ impl Updater {
 impl Drop for Updater {
 
     fn drop(&mut self) {
+        log_debug!("waiting for updater thread to finish");
         self.handle.take().map(|handle| handle.join().unwrap());
     }
 }
@@ -603,6 +632,8 @@ impl Tree {
     fn from_page_tree_store(page_tree_store: &gtk::TreeStore) -> Tree {
         use gtk::{ TreeModelExt, Cast };
         use page_tree_store;
+
+        log_trace!("collecting tree structure");
 
         fn populate(
             model: &gtk::TreeModel,
@@ -620,6 +651,8 @@ impl Tree {
 
         let mut nodes = Vec::new();
         populate(&page_tree_store.clone().upcast(), &mut nodes, None, None);
+        
+        log_trace!("tree structure collected");
 
         Tree { nodes }
     }

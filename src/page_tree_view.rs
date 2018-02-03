@@ -124,7 +124,6 @@ pub fn setup(app: app::Handle) {
         use gtk::{ Cast };
 
         let page_store = try_extract!(app.page_store());
-        let session = try_extract!(app.session_updater());
         let count = page_store.pinned_count();
         if count == 0 {
             return;
@@ -149,15 +148,14 @@ pub fn setup(app: app::Handle) {
         for child_id in misplaced {
             page_store.move_to(child_id, None, last_position);
         }
-        session.update_tree(&page_tree_store);
+        page_store.session_update_tree();
         if let Some(id) = app.get_active() {
             select_id(&page_tree_store, view, id);
         }
     }));
 
     page_tree_view.connect_button_press_event(with_cloned!(app, move |view, event| {
-        use gtk::{ TreeModelExt, Cast, MenuExtManual, ToVariant };
-        use gio::{ SimpleActionExt };
+        use gtk::{ TreeModelExt, Cast, MenuExtManual };
         use page_tree_view;
         
         let (x, y) = event.get_position();

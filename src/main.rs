@@ -27,9 +27,17 @@ pub mod bar;
 pub mod menu;
 pub mod page_context_menu;
 pub mod session;
+pub mod recently_closed;
 
 use std::rc;
 use std::cell;
+use std::sync;
+
+const LOG_OFF: usize = 0;
+const LOG_DEBUG: usize = 1;
+const LOG_TRACE: usize = 2;
+
+static CURRENT_LOG_LEVEL: sync::atomic::AtomicUsize = sync::atomic::AtomicUsize::new(LOG_OFF);
 
 mod_tree_store! {
     page_tree_store:
@@ -110,6 +118,17 @@ fn main() {
     use gio;
     use gio::{ ApplicationExt, ApplicationExtManual };
 
+    let log_level = match env::var("BRIMSTONE_LOG") {
+        Ok(value) => match value.as_str() {
+            "debug" => LOG_DEBUG,
+            "trace" => LOG_TRACE,
+            _ => LOG_OFF,
+        },
+        _ => LOG_OFF,
+    };
+    CURRENT_LOG_LEVEL.store(log_level, sync::atomic::Ordering::SeqCst);
+
+    log_debug!("construct application");
     let app = gtk::Application::new(
         "web.brimstone",
         gio::ApplicationFlags::empty(),
@@ -121,16 +140,19 @@ fn main() {
     app.connect_startup(move |app| setup(app, &app_space_sink));
     app.connect_activate(|_| ());
 
+    log_debug!("run application");
     let args = env::args().collect::<Vec<_>>();
     app.run(&args);
+    log_debug!("run complete");
 }
 
 fn setup(app: &gtk::Application, app_space: &rc::Rc<cell::RefCell<Option<app::Application>>>) {
 
-    let mut session_storage = session::Storage::open_or_create("_profile/config/session.db")
-        .unwrap();
+    log_debug!("loading session");
+    let session_storage = session::Storage::open_or_create("_profile/config/session.db").unwrap();
 
-    let page_store = page_store::Store::from_session(&mut session_storage);
+    log_debug!("assembling components");
+    let page_store = page_store::Store::new_stateful(session_storage);
     let count = page_store.get_count();
 
     let app = app::Application::new(app::Data {
@@ -154,9 +176,9 @@ fn setup(app: &gtk::Application, app_space: &rc::Rc<cell::RefCell<Option<app::Ap
         page_context_menu: rc::Rc::new(page_context_menu::create()),
         page_tree_target: cell::Cell::new(None),
         cached_nav_menu: cell::RefCell::new(None),
-        session_updater: rc::Rc::new(session::Updater::new(session_storage)),
     });
 
+    log_debug!("component setup");
     window::setup(app.handle());
     main_paned::setup(app.handle());
     page_tree_view::setup(app.handle());

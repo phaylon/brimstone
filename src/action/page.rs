@@ -42,7 +42,6 @@ impl app::Perform for Close {
         let page_store = try_extract!(app.page_store());
         let page_tree_view = try_extract!(app.page_tree_view());
         let window = try_extract!(app.window());
-        let session = try_extract!(app.session_updater());
 
         let close_children =
             if let Some(close_children) = self.close_children {
@@ -97,7 +96,7 @@ impl app::Perform for Close {
                 None
             };
 
-        app.without_select(|| page_store.close(&session, self.id, close_children));
+        app.without_select(|| page_store.close(self.id, close_children));
         
         if let Some(select) = select {
             page_tree_view.get_selection().unselect_all();
@@ -123,8 +122,7 @@ impl app::Perform for Create {
         let Create { uri, title, parent, position } = self;
 
         let page_store = try_extract!(app.page_store());
-        let session = try_extract!(app.session_updater());
-        let result = page_store.insert(&session, page_store::InsertData {
+        let result = page_store.insert(page_store::InsertData {
             uri,
             title,
             parent,

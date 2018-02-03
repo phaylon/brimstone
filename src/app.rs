@@ -12,7 +12,6 @@ use app_action;
 use status_bar;
 use page_bar;
 use page_context_menu;
-use session;
 
 pub struct Data {
     pub application: gtk::Application,
@@ -35,7 +34,6 @@ pub struct Data {
     pub page_context_menu: rc::Rc<page_context_menu::Map>,
     pub page_tree_target: cell::Cell<Option<page_store::Id>>,
     pub cached_nav_menu: cell::RefCell<Option<gtk::Menu>>,
-    pub session_updater: rc::Rc<session::Updater>,
 }
 
 impl Data {
@@ -186,10 +184,6 @@ impl Handle {
 
     pub fn page_store(&self) -> Option<rc::Rc<page_store::Store>> {
         self.data.upgrade().map(|data| data.page_store.clone())
-    }
-
-    pub fn session_updater(&self) -> Option<rc::Rc<session::Updater>> {
-        self.data.upgrade().map(|data| data.session_updater.clone())
     }
 
     pub fn web_context(&self) -> Option<webkit2gtk::WebContext> {

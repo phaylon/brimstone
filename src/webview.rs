@@ -20,13 +20,12 @@ fn on_property_uri_notify(
 
     let page_store = try_extract!(app.page_store());
     let nav_bar = try_extract!(app.navigation_bar());
-    let session = try_extract!(app.session_updater());
 
     if app.is_active(id) {
         nav_bar.address_entry().set_text(&uri);
     }
 
-    page_store.set_uri(&session, id, uri);
+    page_store.set_uri(id, uri);
 }
 
 fn on_property_title_notify(
@@ -40,9 +39,8 @@ fn on_property_title_notify(
     let uri = view.get_uri();
 
     let page_store = try_extract!(app.page_store());
-    let session = try_extract!(app.session_updater());
 
-    page_store.set_title(&session, id, title.clone());
+    page_store.set_title(id, title.clone());
     if app.is_active(id) {
         app.perform(action::window::SetTitle {
             title: title.as_ref().map(|title| &title[..]),

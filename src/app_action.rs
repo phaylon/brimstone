@@ -15,6 +15,7 @@ const ACCEL_GO_FORWARD: &str = "<alt>Right";
 const ACCEL_NEW: &str = "<ctrl>t";
 const ACCEL_CLOSE: &str = "<ctrl>w";
 const ACCEL_FOCUS: &str = "<ctrl>l";
+const ACCEL_RECENT_REOPEN: &str = "<ctrl><shift>t";
 
 pub const ACTION_QUIT: &str = "app.quit";
 pub const ACTION_GO_BACK: &str = "app.go-back";
@@ -25,6 +26,7 @@ pub const ACTION_STOP: &str = "app.stop-loading";
 pub const ACTION_NEW: &str = "app.new-page";
 pub const ACTION_CLOSE: &str = "app.close-page";
 pub const ACTION_FOCUS: &str = "app.focus";
+pub const ACTION_RECENT_REOPEN: &str = "app.recent-reopen";
 
 pub struct Map {
     pub menu_bar: gio::Menu,
@@ -37,11 +39,16 @@ pub struct Map {
     pub new_page_action: gio::SimpleAction,
     pub close_page_action: gio::SimpleAction,
     pub focus_action: gio::SimpleAction,
+    pub recent_reopen_action: gio::SimpleAction,
+    pub recent_menu: gio::Menu,
 }
 
 pub fn create() -> Map {
+    let recent_menu = gio::Menu::new();
+    let menu_bar = create_menu_bar(&recent_menu);
     Map {
-        menu_bar: create_menu_bar(),
+        menu_bar,
+        recent_menu,
         quit_action: gio::SimpleAction::new("quit", None),
         go_back_action: gio::SimpleAction::new("go-back", None),
         go_forward_action: gio::SimpleAction::new("go-forward", None),
@@ -51,10 +58,12 @@ pub fn create() -> Map {
         new_page_action: gio::SimpleAction::new("new-page", None),
         close_page_action: gio::SimpleAction::new("close-page", None),
         focus_action: gio::SimpleAction::new("focus", None),
+        recent_reopen_action: gio::SimpleAction::new("recent-reopen", None),
     }
 }
 
-fn create_menu_bar() -> gio::Menu {
+fn create_menu_bar(recent_menu: &gio::Menu) -> gio::Menu {
+    use gio::{ MenuExt };
     use menu;
 
     menu::build(|menu| {
@@ -74,6 +83,18 @@ fn create_menu_bar() -> gio::Menu {
                 menu::add_item(menu, "_Stop Loading", ACTION_STOP, Some(ACCEL_STOP));
             });
         });
+        menu::add(menu, "_History", |menu| {
+            menu::add_section(menu, |menu| {
+                menu::add(menu, "_Recently Closed Pages", |menu| {
+                    menu::add_item(menu,
+                        "Re_open Most Recent",
+                        ACTION_RECENT_REOPEN,
+                        Some(ACCEL_RECENT_REOPEN),
+                    );
+                    menu.append_section(None, recent_menu);
+                });
+            });
+        });
     })
 }
 
@@ -90,6 +111,8 @@ pub fn setup(app: app::Handle) {
     menu::setup_action(&app, &app_actions.quit_action, true, |app| {
         let window = try_extract!(app.window());
         window.close();
+    });
+    menu::setup_action(&app, &app_actions.recent_reopen_action, false, |app| {
     });
     menu::setup_action(&app, &app_actions.go_back_action, false, |app| {
         let webview = try_extract!(app.active_webview());

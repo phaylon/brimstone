@@ -12,6 +12,7 @@ use webview;
 use app;
 use page_tree_store;
 use session;
+use recently_closed;
 
 pub type Id = u32;
 
@@ -38,9 +39,11 @@ pub struct Store {
     entries: rc::Rc<cell::RefCell<Vec<Entry>>>,
     pinned: cell::RefCell<Vec<Id>>,
     tree_store: gtk::TreeStore,
+    session: Option<session::Updater>,
+    recently_closed: recently_closed::State,
 }
 
-pub fn setup(app: app::Handle) {}
+pub fn setup(_app: app::Handle) {}
 
 fn recalc(tree_store: &gtk::TreeStore, iter: &gtk::TreeIter) {
     use gtk::{ TreeModelExt, Cast };
@@ -64,7 +67,8 @@ fn recalc(tree_store: &gtk::TreeStore, iter: &gtk::TreeIter) {
 
 impl Store {
 
-    pub fn from_session(session: &mut session::Storage) -> Store {
+    pub fn new_stateful(mut session: session::Storage) -> Store {
+        log_debug!("constructing store from session");
 
         fn populate(
             parent: Option<&gtk::TreeIter>,
@@ -121,14 +125,35 @@ impl Store {
         let mut entries = Vec::new();
         let tree_store = page_tree_store::create();
 
+        log_debug!("populating store from session");
         populate(None, &tree, &mut entries, &tree_store);
+    
+        let session_updater = session::Updater::new(session);
 
         Store {
             last_id: cell::Cell::new(last_id),
             entries: rc::Rc::new(cell::RefCell::new(entries)),
             tree_store,
             pinned: cell::RefCell::new(pinned),
+            session: Some(session_updater),
+            recently_closed: recently_closed::State::new(),
         }
+    }
+
+    pub fn new_stateless() -> Store {
+        Store {
+            last_id: cell::Cell::new(0),
+            entries: rc::Rc::new(cell::RefCell::new(Vec::new())),
+            tree_store: page_tree_store::create(),
+            pinned: cell::RefCell::new(Vec::new()),
+            session: None,
+            recently_closed: recently_closed::State::new(),
+        }
+    }
+
+    pub fn session_update_tree(&self) {
+        let tree_store = &self.tree_store;
+        self.session_update(|session| session.update_tree(tree_store));
     }
 
     pub fn pinned_count(&self) -> usize { self.pinned.borrow().len() }
@@ -145,7 +170,13 @@ impl Store {
         page_tree_store::set::weight(&self.tree_store, &iter, TITLE_WEIGHT_DEFAULT);
     }
 
-    pub fn set_pinned(&self, session: &session::Updater, id: Id, is_pinned: bool) {
+    fn session_update<F>(&self, body: F) where F: FnOnce(&session::Updater) {
+        if let Some(ref updater) = self.session {
+            body(updater);
+        }
+    }
+
+    pub fn set_pinned(&self, id: Id, is_pinned: bool) {
         use gtk::{ TreeModelExt };
 
         let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
@@ -161,8 +192,10 @@ impl Store {
             self.move_to(id, None, count as i32);
             self.pinned.borrow_mut().retain(|pinned_id| *pinned_id != id);
         }
-        session.update_tree(&self.tree_store);
-        session.update_is_pinned(id, is_pinned);
+        self.session_update(|session| {
+            session.update_tree(&self.tree_store);
+            session.update_is_pinned(id, is_pinned);
+        });
         if let Some(old_parent) = old_parent {
             self.recalc(&old_parent);
         }
@@ -181,6 +214,32 @@ impl Store {
     }
 
     pub fn get_count(&self) -> usize { self.entries.borrow().len() }
+
+    pub fn get_position_profile(&self, id: Id) -> Vec<(Option<Id>, u32)> {
+        log_trace!("get position profile for {}", id);
+        
+        let mut parents = Vec::new();
+
+        let mut current = id;
+        loop {
+            match self.position(current) {
+                Some((Some(parent), position)) => {
+                    log_trace!("child of {} at position {}", parent, position);
+                    parents.push((Some(parent), position));
+                    current = parent;
+                },
+                Some((None, position)) => {
+                    log_trace!("root node at position {}", position);
+                    parents.push((None, position));
+                    break;
+                },
+                None => break,
+            }
+        }
+
+        log_trace!("position profile complete");
+        parents
+    }
 
     pub fn get_parent(&self, id: Id) -> Option<Id> {
         use gtk::{ TreeModelExt, Cast };
@@ -272,11 +331,10 @@ impl Store {
         children
     }
 
-    pub fn close(&self, session: &session::Updater, id: Id, close_children: bool) {
+    pub fn close(&self, id: Id, close_children: bool) {
         use gtk::{ Cast, TreeStoreExt, ContainerExt, WidgetExt, TreeModelExt };
 
         fn deep_close(
-            session: &session::Updater,
             page_store: &Store,
             model: &gtk::TreeModel,
             store: &gtk::TreeStore,
@@ -284,17 +342,26 @@ impl Store {
         ) {
             let id: Id = page_tree_store::get::id(&model, &iter);
             for (_child_id, child_iter) in page_store.children(Some(iter)) {
-                deep_close(session, page_store, model, store, &child_iter);
+                deep_close(page_store, model, store, &child_iter);
             }
-            store.remove(iter);
-            session.update_remove(id);
+
             let mut entries = page_store.entries.borrow_mut();
             let index = entries.iter().position(|entry| entry.id == id).unwrap();
             let entry = entries.remove(index);
+            page_store.recently_closed.push(recently_closed::Page {
+                id,
+                title: entry.title,
+                uri: entry.uri,
+                position: page_store.get_position_profile(id),
+            });
+            store.remove(iter);
+            page_store.session_update(|session| session.update_remove(id));
+
             let webview = match entry.view {
                 Some(webview) => webview,
                 None => return,
             };
+
             let mut widget: gtk::Widget = webview.upcast();
             while let Some(parent) = widget.get_parent() {
                 if let Some(name) = parent.get_name() {
@@ -327,8 +394,8 @@ impl Store {
 
         let parent_iter = self.tree_store.iter_parent(&iter);
 
-        deep_close(session, self, &model, &self.tree_store, &iter);
-        session.update_tree(&self.tree_store);
+        deep_close(self, &model, &self.tree_store, &iter);
+        self.session_update(|session| session.update_tree(&self.tree_store));
 
         if let Some(parent_iter) = parent_iter {
             self.recalc(&parent_iter);
@@ -396,14 +463,16 @@ impl Store {
         }
     }
 
-    pub fn set_uri(&self, session: &session::Updater, id: Id, value: String) {
-        session.update_uri(id, value.clone());
+    pub fn set_uri(&self, id: Id, value: String) {
+        self.session_update(|session| session.update_uri(id, value.clone()));
         self.map_entry_mut(id, |entry| entry.uri = value);
         self.update_tree_title(id);
     }
 
-    pub fn set_title(&self, session: &session::Updater, id: Id, value: Option<String>) {
-        session.update_title(id, value.clone().unwrap_or_else(|| String::new()));
+    pub fn set_title(&self, id: Id, value: Option<String>) {
+        self.session_update(|session|
+            session.update_title(id, value.clone().unwrap_or_else(|| String::new()))
+        );
         self.map_entry_mut(id, |entry| entry.title = value);
         self.update_tree_title(id);
     }
@@ -478,8 +547,9 @@ impl Store {
         next_id
     }
 
-    pub fn insert(&self, session: &session::Updater, data: InsertData) -> Option<Id> {
+    pub fn insert(&self, data: InsertData) -> Option<Id> {
         use gtk::{ TreeModelExt };
+        let InsertData { uri, title, parent, position } = data;
 
         let id = self.find_next_id();
         let parent_iter = match data.parent {
@@ -491,8 +561,8 @@ impl Store {
         };
         self.entries.borrow_mut().push(Entry {
             id,
-            uri: data.uri.clone(),
-            title: data.title.clone(),
+            uri: uri.clone(),
+            title: title.clone(),
             view: None,
             favicon: None,
             is_noclose: false,
@@ -506,14 +576,14 @@ impl Store {
         });
         let position = {
             let end_index = self.tree_store.iter_n_children(parent_iter.as_ref()) as u32;
-            let mut position = match data.position {
+            let mut position = match position {
                 InsertPosition::Start => 0,
                 InsertPosition::End => end_index,
                 InsertPosition::Before(id) =>
-                    page_tree_store::find_position(&self.tree_store, id, data.parent)
+                    page_tree_store::find_position(&self.tree_store, id, parent)
                         .unwrap_or(end_index),
                 InsertPosition::After(id) =>
-                    page_tree_store::find_position(&self.tree_store, id, data.parent)
+                    page_tree_store::find_position(&self.tree_store, id, parent)
                         .map(|pos| pos + 1)
                         .unwrap_or(end_index),
             };
@@ -523,7 +593,7 @@ impl Store {
             }
             position
         };
-        let title = data.title.unwrap_or_else(|| String::new());
+        let title = title.unwrap_or_else(|| String::new());
         page_tree_store::insert(
             &self.tree_store,
             parent_iter.clone(),
@@ -539,7 +609,7 @@ impl Store {
                 is_pinned: false,
             },
         );
-        session.update_create(id, data.uri, data.parent, position);
+        self.session_update(|session| session.update_create(id, uri, parent, position));
         if let Some(ref iter) = parent_iter {
             self.recalc(iter);
         }

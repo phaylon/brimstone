@@ -13,6 +13,24 @@ macro_rules! with_cloned {
     }}
 }
 
+macro_rules! log_if_level {
+    ($level:expr, $( ( $($arg:tt)* ) ),* $(,)*) => {
+        if ::CURRENT_LOG_LEVEL.load(::std::sync::atomic::Ordering::Relaxed) >= $level {
+            $(
+                eprintln!("{}: {}", module_path!(), &format!($($arg)*));
+            )*
+        }
+    }
+}
+
+macro_rules! log_trace {
+    ($($arg:tt)*) => { log_if_level!(::LOG_TRACE, ($($arg)*)) }
+}
+
+macro_rules! log_debug {
+    ($($arg:tt)*) => { log_if_level!(::LOG_DEBUG, ($($arg)*)) }
+}
+
 macro_rules! consts_seq {
     ($ty:ty, $index:expr, $name:ident $($rest:tt)*) => {
 
