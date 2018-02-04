@@ -126,6 +126,7 @@ fn setup(app: &gtk::Application, app_space: &rc::Rc<cell::RefCell<Option<app::Ap
             uri: "https://crates.io".into(),
             parent: None,
             position: page_store::InsertPosition::Start,
+            reuse_id: None,
         }).unwrap();
     }
 

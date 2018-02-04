@@ -98,7 +98,7 @@ impl Store {
                     None,
                     page_tree_store::Entry {
                         id: child.borrow().id,
-                        title: title.unwrap_or_else(|| uri),
+                        title: text::escape(&title.unwrap_or_else(|| uri)).into(),
                         child_info: "".into(),
                         has_children: false,
                         child_count: 0,
@@ -330,16 +330,13 @@ impl Store {
         children
     }
 
-    pub fn find_first_existing<I>(&self, ids: I) -> Option<Id>
-    where I: Iterator<Item=Id> {
-        for id in ids {
-            for entry in self.entries.borrow().iter() {
-                if entry.id == id {
-                    return Some(id);
-                }
+    pub fn exists(&self, id: Id) -> bool {
+        for entry in self.entries.borrow().iter() {
+            if entry.id == id {
+                return true;
             }
         }
-        None
+        false
     }
 
     pub fn close(&self, id: Id, close_children: bool) {
@@ -460,16 +457,23 @@ impl Store {
 
     fn update_tree_title(&self, id: Id) {
         if let Some(iter) = page_tree_store::find_iter_by_id(&self.tree_store, id) {
-            let title = self.get_title(id);
-            page_tree_store::set_title(&self.tree_store, &iter, &match title {
-                Some(ref title) =>
-                    if title.is_empty() {
-                        self.get_uri(id).unwrap_or_else(|| text::RcString::new())
-                    } else {
-                        title.clone()
-                    },
-                None => self.get_uri(id).unwrap_or_else(|| text::RcString::new()),
-            });
+            let title = self.get_title(id).map(|title| (title.len(), title));
+            match title {
+                Some((len, ref title)) if len > 0 => {
+                    page_tree_store::set_title(
+                        &self.tree_store,
+                        &iter,
+                        &text::escape(&title),
+                    );
+                },
+                _ => {
+                    page_tree_store::set_title(
+                        &self.tree_store,
+                        &iter,
+                        &text::escape(&self.get_uri(id).unwrap_or_else(|| text::RcString::new())),
+                    );
+                },
+            };
         }
     }
 
@@ -560,9 +564,12 @@ impl Store {
 
     pub fn insert(&self, data: InsertData) -> Option<Id> {
         use gtk::{ TreeModelExt };
-        let InsertData { uri, title, parent, position } = data;
+        let InsertData { uri, title, parent, position, reuse_id } = data;
 
-        let id = self.find_next_id();
+        let id = reuse_id.unwrap_or_else(|| self.find_next_id());
+        if self.exists(id) {
+            panic!("page id {} is already in store", id);
+        }
         let parent_iter = match data.parent {
             Some(parent_id) => Some(try_extract!(page_tree_store::find_iter_by_id(
                 &self.tree_store,
@@ -590,6 +597,7 @@ impl Store {
             let mut position = match position {
                 InsertPosition::Start => 0,
                 InsertPosition::End => end_index,
+                InsertPosition::At(index) => index,
                 InsertPosition::Before(id) => self.position(id)
                     .and_then(|(position_parent, position)| {
                         if position_parent == parent {
@@ -613,6 +621,7 @@ impl Store {
                 let pin_count = self.pinned.borrow().len() as u32;
                 position = cmp::max(position, pin_count);
             }
+            position = cmp::min(position, end_index + 1);
             position
         };
         let title = title.unwrap_or_else(|| text::RcString::new());
@@ -622,7 +631,7 @@ impl Store {
             Some(position),
             page_tree_store::Entry {
                 id,
-                title: title.into_string(),
+                title: text::escape(&title).into(),
                 child_info: "".into(),
                 has_children: false,
                 child_count: 0,
@@ -632,6 +641,7 @@ impl Store {
             },
         );
         self.session_update(|session| session.update_create(id, &uri, parent, position));
+        self.session_update(|session| session.update_title(id, &title));
         self.count_change_notifier.emit(self, &self.get_count());
         if let Some(ref iter) = parent_iter {
             self.recalc(iter);
@@ -650,6 +660,7 @@ impl Store {
 
 pub enum InsertPosition {
     Start,
+    At(u32),
     Before(Id),
     After(Id),
     End,
@@ -660,6 +671,7 @@ pub struct InsertData {
     pub title: Option<text::RcString>,
     pub parent: Option<Id>,
     pub position: InsertPosition,
+    pub reuse_id: Option<Id>,
 }
 
 struct Entry {

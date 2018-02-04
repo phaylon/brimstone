@@ -121,8 +121,6 @@ pub fn setup(app: app::Handle) {
         let window = try_extract!(app.window());
         window.close();
     });
-    menu::setup_action(&app, &app_actions.recent_reopen_action, false, |_app| {
-    });
     menu::setup_action(&app, &app_actions.go_back_action, false, |app| {
         let webview = try_extract!(app.active_webview());
         if webview.can_go_back() {
@@ -158,6 +156,7 @@ pub fn setup(app: app::Handle) {
             uri: "about:blank".into(),
             parent: parent_id,
             position: page_store::InsertPosition::After(id),
+            reuse_id: None,
         }));
 
         page_tree_view.select(new_id);
@@ -174,17 +173,18 @@ pub fn setup(app: app::Handle) {
         try_close_page(&app, try_extract!(app.get_active()));
     });
     menu::setup_param_action(&app, &app_actions.reopen_action, true, |app, id: page_store::Id| {
-        let page_store = try_extract!(app.page_store());
-        let page = try_extract!(page_store.recently_closed_state().pull(id));
-        let parent = page_store
-            .find_first_existing(page.position.iter().filter_map(|par| par.0));
+        reopen(&app, Some(id));
+    });
+    menu::setup_action(&app, &app_actions.recent_reopen_action, false, |app| {
+        reopen(&app, None);
     });
 
     page_store.recently_closed_state().on_change(with_cloned!(app, move |state, _| {
-        use gio::{ MenuItemExt, MenuExt };
+        use gio::{ MenuItemExt, MenuExt, SimpleActionExt };
         use gtk::{ ToVariant };
 
         let app_actions = try_extract!(app.app_actions());
+
         let menu = &app_actions.recent_menu;
         menu.remove_all();
         state.iterate_pages(|page| {
@@ -195,6 +195,8 @@ pub fn setup(app: app::Handle) {
             item.set_action_and_target_value(ACTION_REOPEN, Some(&page.id.to_variant()));
             menu.prepend_item(&item);
         });
+        
+        app_actions.recent_reopen_action.set_enabled(!state.is_empty());
     }));
     
     page_store.on_load_state_change(with_cloned!(app, move |_page_store, &(id, state)| {
@@ -208,6 +210,39 @@ pub fn setup(app: app::Handle) {
         let load_state = try_extract!(page_store.get_load_state(id));
         adjust_for_load_state(&app, load_state);
     }));
+}
+
+fn reopen(app: &app::Handle, id: Option<page_store::Id>) {
+
+    let page_store = try_extract!(app.page_store());
+    let page_tree_view = try_extract!(app.page_tree_view());
+    let page = match id {
+        Some(id) => try_extract!(page_store.recently_closed_state().pull(id)),
+        None => try_extract!(page_store.recently_closed_state().pull_most_recent()),
+    };
+
+    let mut parent = (None, page_store::InsertPosition::Start);
+    for position in page.position.iter() {
+        if let Some(parent_id) = position.0 {
+            if page_store.exists(parent_id) {
+                parent = (Some(parent_id), page_store::InsertPosition::At(position.1));
+                break;
+            }
+        } else {
+            parent = (None, page_store::InsertPosition::At(position.1));
+            break;
+        }
+    }
+
+    let id = page_store.insert(page_store::InsertData {
+        title: page.title.clone(),
+        uri: page.uri.clone(),
+        parent: parent.0,
+        position: parent.1,
+        reuse_id: Some(page.id),
+    }).expect("fresh id for reopened page");
+
+    page_tree_view.select(id);
 }
 
 fn adjust_for_load_state(app: &app::Handle, state: page_store::LoadState) {
@@ -264,6 +299,7 @@ fn find_next_selection(app: &app::Handle, parent: Option<page_store::Id>, positi
             title: Some("about:blank".into()),
             parent: None,
             position: page_store::InsertPosition::End,
+            reuse_id: None,
         }).expect("created fallback page")
     }
 }

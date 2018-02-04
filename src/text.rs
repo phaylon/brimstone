@@ -2,10 +2,42 @@
 use std::rc;
 use std::ops;
 use std::fmt;
+use std::borrow;
 
 pub fn pluralize<'a, T>(value: T, singular: &'a str, plural: &'a str) -> &'a str
 where T: Into<u64> {
     if value.into() == 1 { singular } else { plural }
+}
+
+pub fn escape<'a>(value: &'a str) -> borrow::Cow<'a, str> {
+
+    const REPLACE: &[char] = &['&', '"', '<', '>'];
+
+    if value.contains(REPLACE) {
+        let mut escaped = String::new();
+        let mut rest = value;
+        loop {
+            if let Some(index) = rest.find(REPLACE) {
+                escaped.push_str(&rest[..index]);
+                rest = &rest[index..];
+                let found = rest.chars().next().unwrap();
+                rest = &rest[found.len_utf8()..];
+                escaped.push_str(match found {
+                    '&' => "&amp;",
+                    '"' => "&quot;",
+                    '<' => "&lt;",
+                    '>' => "&gt;",
+                    other => panic!("unexpected escape char {:?}", other),
+                });
+            } else {
+                escaped.push_str(rest);
+                break;
+            }
+        }
+        escaped.into()
+    } else {
+        value.into()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +69,13 @@ impl From<String> for RcString {
         RcString {
             value: rc::Rc::new(value)
         }
+    }
+}
+
+impl<'a> From<borrow::Cow<'a, str>> for RcString {
+
+    fn from(value: borrow::Cow<'a, str>) -> RcString {
+        value.to_owned().into()
     }
 }
 

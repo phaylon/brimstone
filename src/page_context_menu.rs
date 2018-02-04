@@ -130,6 +130,7 @@ pub fn setup(app: app::Handle) {
             title,
             parent,
             position: page_store::InsertPosition::After(id),
+            reuse_id: None,
         });
     });
 

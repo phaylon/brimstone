@@ -27,6 +27,10 @@ impl State {
         }
     }
 
+    pub fn get_count(&self) -> usize { self.items.borrow().len() }
+
+    pub fn is_empty(&self) -> bool { self.get_count() == 0 }
+
     fn find_index(&self, id: page_store::Id) -> Option<usize> {
         let pages = self.items.borrow();
         for index in 0..pages.len() {
@@ -40,6 +44,10 @@ impl State {
     pub fn pull(&self, id: page_store::Id) -> Option<Page> {
         let index = self.find_index(id)?;
         Some(self.items.borrow_mut().remove(index))
+    }
+
+    pub fn pull_most_recent(&self) -> Option<Page> {
+        self.items.borrow_mut().pop()
     }
 
     pub fn push(&self, page: Page) {

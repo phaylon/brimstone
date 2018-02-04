@@ -112,6 +112,7 @@ fn on_decide_policy(
             title: Some(uri.into()),
             parent: Some(id),
             position: page_store::InsertPosition::Start,
+            reuse_id: None,
         }).expect("page creation");
         let page_tree_view = try_extract!(app.page_tree_view());
         page_tree_view.expand(id, false);
