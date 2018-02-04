@@ -14,6 +14,7 @@ use page_tree_store;
 use session;
 use recently_closed;
 use text;
+use signal;
 
 pub type Id = u32;
 
@@ -42,29 +43,16 @@ pub struct Store {
     tree_store: gtk::TreeStore,
     session: Option<session::Updater>,
     recently_closed: recently_closed::State,
+    count_change_notifier: signal::Notifier<Store, usize>,
+    load_state_change_notifier: signal::Notifier<Store, (Id, LoadState)>,
 }
 
 pub fn setup(_app: app::Handle) {}
 
-fn recalc(tree_store: &gtk::TreeStore, iter: &gtk::TreeIter) {
-    use gtk::{ TreeModelExt };
-    
-    let mut sum = 0;
-    for index in 0..tree_store.iter_n_children(iter) {
-        let child_iter = tree_store.iter_nth_child(iter, index).unwrap();
-        sum += 1 + page_tree_store::get_child_count(tree_store, &child_iter);
-    }
-
-    page_tree_store::set_child_count(tree_store, iter, sum);
-    page_tree_store::set_has_children(tree_store, iter, sum > 0);
-    page_tree_store::set_child_info(tree_store, iter, &format!("({})", sum));
-
-    if let Some(parent_iter) = tree_store.iter_parent(iter) {
-        recalc(tree_store, &parent_iter);
-    }
-}
-
 impl Store {
+
+    fn_connect_notifier!(count_change_notifier, on_count_change, usize);
+    fn_connect_notifier!(load_state_change_notifier, on_load_state_change, (Id, LoadState));
 
     pub fn new_stateful(mut session: session::Storage) -> Store {
         log_debug!("constructing store from session");
@@ -113,7 +101,7 @@ impl Store {
                     },
                 );
                 populate(Some(&iter), &child.borrow().children, entries, tree_store);
-                recalc(tree_store, &iter);
+                page_tree_store::recalc(tree_store, &iter);
             }
         }
 
@@ -136,6 +124,8 @@ impl Store {
             pinned: cell::RefCell::new(pinned),
             session: Some(session_updater),
             recently_closed: recently_closed::State::new(),
+            count_change_notifier: signal::Notifier::new(),
+            load_state_change_notifier: signal::Notifier::new(),
         }
     }
 
@@ -147,6 +137,8 @@ impl Store {
             pinned: cell::RefCell::new(Vec::new()),
             session: None,
             recently_closed: recently_closed::State::new(),
+            count_change_notifier: signal::Notifier::new(),
+            load_state_change_notifier: signal::Notifier::new(),
         }
     }
 
@@ -406,6 +398,7 @@ impl Store {
 
         deep_close(self, &self.tree_store, &iter);
         self.session_update(|session| session.update_tree(&self.tree_store));
+        self.count_change_notifier.emit(self, &self.get_count());
 
         if let Some(parent_iter) = parent_iter {
             self.recalc(&parent_iter);
@@ -493,6 +486,7 @@ impl Store {
 
     pub fn set_load_state(&self, id: Id, state: LoadState) {
         self.map_entry_mut(id, |entry| entry.load_state = state);
+        self.load_state_change_notifier.emit(self, &(id, state));
     }
 
     pub fn get_favicon(&self, id: Id) -> Option<cairo::Surface> {
@@ -631,6 +625,7 @@ impl Store {
             },
         );
         self.session_update(|session| session.update_create(id, &uri, parent, position));
+        self.count_change_notifier.emit(self, &self.get_count());
         if let Some(ref iter) = parent_iter {
             self.recalc(iter);
         }
@@ -638,7 +633,7 @@ impl Store {
     }
 
     fn recalc(&self, iter: &gtk::TreeIter) {
-        recalc(&self.tree_store, iter);
+        page_tree_store::recalc(&self.tree_store, iter);
     }
 
     pub fn contains(&self, id: Id) -> bool {

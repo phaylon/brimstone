@@ -8,26 +8,6 @@ use page_tree_view;
 use window;
 use text;
 
-pub struct UpdateCounter;
-
-impl app::Perform for UpdateCounter {
-
-    type Result = ();
-
-    fn perform(self, app: &app::Handle) {
-        use gtk::{ LabelExt };
-
-        let page_store = try_extract!(app.page_store());
-        let status_bar = try_extract!(app.status_bar());
-
-        let count = page_store.get_count();
-        status_bar.page_counter().set_text(&format!("{} {}",
-            count,
-            if count == 1 { "page" } else { "pages" },
-        ));
-    }
-}
-
 pub struct Close {
     pub id: page_store::Id,
     pub close_children: Option<bool>,
@@ -85,7 +65,7 @@ impl app::Perform for Close {
                     if let Some(id) = page_store.find_previous(parent, position) { id }
                     else if let Some(id) = page_store.find_next_incl(parent, position + 1) { id }
                     else {
-                        app.perform(Create {
+                        page_store.insert(page_store::InsertData {
                             uri: "about:blank".into(),
                             title: Some("about:blank".into()),
                             parent: None,
@@ -104,35 +84,6 @@ impl app::Perform for Close {
             page_tree_view::select_id(&page_store.tree_store(), &page_tree_view, select);
         }
 
-        app.perform(UpdateCounter);
-    }
-}
-
-pub struct Create {
-    pub uri: text::RcString,
-    pub title: Option<text::RcString>,
-    pub parent: Option<page_store::Id>,
-    pub position: page_store::InsertPosition,
-}
-
-impl app::Perform for Create {
-
-    type Result = Option<page_store::Id>;
-
-    fn perform(self, app: &app::Handle) -> Option<page_store::Id> {
-        let Create { uri, title, parent, position } = self;
-
-        let page_store = try_extract!(app.page_store());
-        let result = page_store.insert(page_store::InsertData {
-            uri,
-            title,
-            parent,
-            position,
-        });
-
-        app.perform(UpdateCounter);
-
-        result
     }
 }
 
@@ -146,6 +97,8 @@ impl app::Perform for Select {
 
     fn perform(self, app: &app::Handle) {
         use gtk::{ WidgetExt, BoxExt, EntryExt };
+        use navigation_bar;
+        use app_action;
 
         if app.is_select_ignored() {
             return;
@@ -166,7 +119,8 @@ impl app::Perform for Select {
             None => (),
         }
         app.set_active(self.id, new_view.clone());
-        app.perform(AdjustUi { state: page_store.get_load_state(self.id).unwrap() });
+        navigation_bar::adjust_for_load_state(app, page_store.get_load_state(self.id).unwrap());
+        app_action::adjust_for_load_state(app, page_store.get_load_state(self.id).unwrap());
 
         app.perform(action::window::SetTitle {
             title: title.as_ref().map(|title| &title[..]),
@@ -181,63 +135,5 @@ impl app::Perform for Select {
         }
         view_space.show();
         new_view.show_all();
-    }
-}
-
-pub struct LoadStateChange {
-    pub id: page_store::Id,
-    pub state: page_store::LoadState,
-}
-
-impl app::Perform for LoadStateChange {
-
-    type Result = ();
-    
-    fn perform(self, app: &app::Handle) {
-
-        let page_store = try_extract!(app.page_store());
-        page_store.set_load_state(self.id, self.state);
-        if app.is_active(self.id) {
-            app.perform(AdjustUi { state: self.state });
-        }
-    }
-}
-
-pub struct AdjustUi {
-    pub state: page_store::LoadState,
-}
-
-impl app::Perform for AdjustUi {
-
-    type Result = ();
-    
-    fn perform(self, app: &app::Handle) {
-        use gtk::{ WidgetExt, EntryExt };
-        use gio::{ SimpleActionExt };
-
-        let nav_bar = try_extract!(app.navigation_bar());
-        let app_actions = try_extract!(app.app_actions());
-
-        nav_bar.reload_button().set_visible(!self.state.is_loading);
-        nav_bar.stop_button().set_visible(self.state.is_loading);
-
-        let (tls_icon, tls_tooltip) = match self.state.tls_state {
-            page_store::TlsState::Encrypted =>
-                ("security-high", "Security: Encrypted"),
-            page_store::TlsState::SelfSigned =>
-                ("security-medium", "Security: Self-Signed"),
-            page_store::TlsState::Insecure =>
-                ("security-low", "Security: Insecure"),
-        };
-        let address_entry = nav_bar.address_entry();
-        address_entry.set_icon_from_icon_name(gtk::EntryIconPosition::Primary, tls_icon);
-        address_entry.set_icon_tooltip_text(gtk::EntryIconPosition::Primary, tls_tooltip);
-
-        app_actions.go_back_action.set_enabled(self.state.can_go_back);
-        app_actions.go_forward_action.set_enabled(self.state.can_go_forward);
-
-        app_actions.reload_action.set_enabled(!self.state.is_loading);
-        app_actions.reload_bp_action.set_enabled(!self.state.is_loading);
-        app_actions.stop_loading_action.set_enabled(self.state.is_loading);
     }
 }

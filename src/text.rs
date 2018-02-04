@@ -2,6 +2,11 @@
 use std::rc;
 use std::ops;
 
+pub fn pluralize<'a, T>(value: T, singular: &'a str, plural: &'a str) -> &'a str
+where T: Into<u64> {
+    if value.into() == 1 { singular } else { plural }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RcString {
     value: rc::Rc<String>,

@@ -129,7 +129,7 @@ pub fn setup(app: app::Handle) {
         let parent = page_store.get_parent(id);
         let uri = page_store.get_uri(id);
         let title = page_store.get_title(id);
-        app.perform(action::page::Create {
+        page_store.insert(page_store::InsertData {
             uri: uri.unwrap_or_else(|| text::RcString::new()),
             title,
             parent,

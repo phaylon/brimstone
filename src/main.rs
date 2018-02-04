@@ -1,36 +1,36 @@
 
-extern crate gtk;
-extern crate gio;
-extern crate gdk;
-extern crate glib;
 extern crate cairo;
+extern crate gdk;
+extern crate gio;
+extern crate glib;
+extern crate gtk;
 extern crate pango;
-extern crate webkit2gtk;
 extern crate rusqlite;
+extern crate webkit2gtk;
 
 #[macro_use] mod macros;
 
-pub mod app;
-pub mod window;
-pub mod main_paned;
-pub mod scrolled;
-pub mod page_tree_view;
-pub mod navigation_bar;
-pub mod page_store;
 pub mod action;
-pub mod webview;
+pub mod app;
 pub mod app_action;
-pub mod status_bar;
-pub mod mouse;
-pub mod page_bar;
 pub mod bar;
+pub mod main_paned;
 pub mod menu;
+pub mod mouse;
+pub mod navigation_bar;
+pub mod page_bar;
 pub mod page_context_menu;
-pub mod session;
-pub mod recently_closed;
-pub mod signal;
-pub mod text;
+pub mod page_store;
 pub mod page_tree_store;
+pub mod page_tree_view;
+pub mod recently_closed;
+pub mod scrolled;
+pub mod session;
+pub mod signal;
+pub mod status_bar;
+pub mod text;
+pub mod webview;
+pub mod window;
 
 use std::rc;
 use std::cell;
@@ -41,87 +41,6 @@ const LOG_DEBUG: usize = 1;
 const LOG_TRACE: usize = 2;
 
 static CURRENT_LOG_LEVEL: sync::atomic::AtomicUsize = sync::atomic::AtomicUsize::new(LOG_OFF);
-
-/*
-mod_tree_store! {
-    page_tree_store:
-    struct {
-        id: ::page_store::Id,
-        title: String,
-        child_info: String,
-        has_children: bool,
-        child_count: u32,
-        style: ::pango::Style,
-        weight: i32,
-        is_pinned: bool,
-    }
-    pub fn set_title(store: &gtk::TreeStore, iter: &gtk::TreeIter, title: &str) {
-        use ::gtk::{ TreeStoreExtManual, ToValue };
-        store.set_value(iter, self::index::title, &title.to_value());
-    }
-    pub fn find_position(
-        store: &gtk::TreeStore,
-        id: ::page_store::Id,
-        parent_id: Option<::page_store::Id>,
-    ) -> Option<u32> {
-        use gtk::{ TreeModelExt, Cast };
-
-        let parent_iter = match parent_id {
-            Some(parent_id) => Some(try_extract!(find_iter_by_id(store, parent_id))),
-            None => None,
-        };
-        let count = store.iter_n_children(parent_iter.as_ref());
-        let model = store.clone().upcast();
-        for index in 0..count {
-            match store.iter_nth_child(parent_iter.as_ref(), index) {
-                Some(iter) => {
-                    let iter_id: ::page_store::Id = self::get::id(&model, &iter);
-                    if iter_id == id {
-                        return Some(index as u32);
-                    }
-                },
-                None => (),
-            }
-        }
-        None
-    }
-    pub fn find_iter_by_id(
-        store: &gtk::TreeStore,
-        id: ::page_store::Id,
-    ) -> Option<gtk::TreeIter> {
-        use gtk::{ Cast };
-
-        fn find_in_children(
-            store: &gtk::TreeModel,
-            id: ::page_store::Id,
-            parent: Option<&gtk::TreeIter>,
-        ) -> Option<gtk::TreeIter> {
-            use gtk::{ TreeModelExt };
-
-            let count = store.iter_n_children(parent);
-            for index in 0..count {
-                match store.iter_nth_child(parent, index) {
-                    Some(iter) => {
-                        let iter_id: ::page_store::Id = self::get::id(store, &iter);
-                        if iter_id == id {
-                            return Some(iter);
-                        }
-                        if let Some(iter) = find_in_children(store, id, Some(&iter)) {
-                            return Some(iter);
-                        }
-                    },
-                    None => (),
-                }
-            }
-            None
-        }
-
-        let store = store.clone().upcast::<gtk::TreeModel>();
-        find_in_children(&store, id, None)
-    }
-}
-*/
-
 
 fn main() {
     use std::env;
@@ -199,29 +118,15 @@ fn setup(app: &gtk::Application, app_space: &rc::Rc<cell::RefCell<Option<app::Ap
     page_context_menu::setup(app.handle());
     page_store::setup(app.handle());
 
-    app.handle().perform(action::page::UpdateCounter);
-
     window::present(&app);
 
     if count == 0 {
-        let prev = app.handle().perform(::action::page::Create {
+        app.handle().page_store().unwrap().insert(page_store::InsertData {
             title: Some("Test Crates".into()),
             uri: "https://crates.io".into(),
             parent: None,
             position: page_store::InsertPosition::Start,
         }).unwrap();
-        let _prev = app.handle().perform(::action::page::Create {
-            title: Some("Test Rust".into()),
-            uri: "https://www.rust-lang.org".into(),
-            parent: Some(prev),
-            position: page_store::InsertPosition::After(prev),
-        }).unwrap();
-        app.handle().perform(::action::page::Create {
-            title: Some("Test Youtube".into()),
-            uri: "https://www.youtube.com".into(),
-            parent: None,
-            position: page_store::InsertPosition::End,
-        });
     }
 
     *app_space.borrow_mut() = Some(app);

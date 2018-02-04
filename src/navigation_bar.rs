@@ -8,6 +8,7 @@ use app;
 use app_action;
 use bar;
 use mouse;
+use page_store;
 
 pub struct Bar {
     pub container: gtk::Box,
@@ -102,6 +103,7 @@ pub fn setup(app: app::Handle) {
     use gio::{ ActionExt };
 
     let bar = app.navigation_bar().unwrap().bar;
+    let page_store = app.page_store().unwrap();
 
     bar.container.pack_start(&bar.go_back_button, false, true, 0);
     bar.container.pack_start(&bar.go_forward_button, false, true, 0);
@@ -144,4 +146,32 @@ pub fn setup(app: app::Handle) {
     }));
 
     app.bar_size_group().unwrap().add_widget(&bar.container);
+
+    page_store.on_load_state_change(with_cloned!(app, move |_page_store, &(id, state)| {
+        if app.is_active(id) {
+            adjust_for_load_state(&app, state);
+        }
+    }));
+}
+
+pub fn adjust_for_load_state(app: &app::Handle, state: page_store::LoadState) {
+    use gtk::{ WidgetExt, EntryExt };
+
+    let nav_bar = try_extract!(app.navigation_bar());
+
+    nav_bar.reload_button().set_visible(!state.is_loading);
+    nav_bar.stop_button().set_visible(state.is_loading);
+
+    let (tls_icon, tls_tooltip) = match state.tls_state {
+        page_store::TlsState::Encrypted =>
+            ("security-high", "Security: Encrypted"),
+        page_store::TlsState::SelfSigned =>
+            ("security-medium", "Security: Self-Signed"),
+        page_store::TlsState::Insecure =>
+            ("security-low", "Security: Insecure"),
+    };
+
+    let address_entry = nav_bar.address_entry();
+    address_entry.set_icon_from_icon_name(gtk::EntryIconPosition::Primary, tls_icon);
+    address_entry.set_icon_tooltip_text(gtk::EntryIconPosition::Primary, tls_tooltip);
 }

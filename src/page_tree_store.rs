@@ -42,6 +42,26 @@ pub fn cmp(store: &gtk::TreeStore, a: &gtk::TreeIter, b: &gtk::TreeIter) -> bool
     get_id(store, a) == get_id(store, b)
 }
 
+pub fn recalc(tree_store: &gtk::TreeStore, iter: &gtk::TreeIter) {
+    use gtk::{ TreeModelExt };
+    
+    let mut sum = 0;
+    for index in 0..tree_store.iter_n_children(iter) {
+        let child_iter = tree_store.iter_nth_child(iter, index).unwrap();
+        sum += 1 + get_child_count(tree_store, &child_iter);
+    }
+
+    set_child_count(tree_store, iter, sum);
+    set_has_children(tree_store, iter, sum > 0);
+    if sum > 0 {
+        set_child_info(tree_store, iter, &format!("({})", sum));
+    }
+
+    if let Some(parent_iter) = tree_store.iter_parent(iter) {
+        recalc(tree_store, &parent_iter);
+    }
+}
+
 pub fn find_position(
     store: &gtk::TreeStore,
     iter: &gtk::TreeIter,

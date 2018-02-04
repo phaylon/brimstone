@@ -69,6 +69,7 @@ pub fn setup(app: app::Handle) {
     use pango;
 
     let bar = try_extract!(app.status_bar());
+    let page_store = try_extract!(app.page_store());
 
     bar.page_tree_status().pack_start(&bar.page_counter(), true, true, 0);
     bar.page_tree_status().set_margin_top(3);
@@ -83,4 +84,19 @@ pub fn setup(app: app::Handle) {
 
     bar.size_group().add_widget(&bar.page_tree_status());
     bar.size_group().add_widget(&bar.webview_status());
+
+    update_counter(&app, page_store.get_count());
+    page_store.on_count_change(with_cloned!(app, move |_page_store, &count| {
+        update_counter(&app, count);
+    }));
+}
+
+fn update_counter(app: &app::Handle, count: usize) {
+    use gtk::{ LabelExt };
+
+    let status_bar = try_extract!(app.status_bar());
+    status_bar.page_counter().set_text(&format!("{} {}",
+        count,
+        if count == 1 { "page" } else { "pages" },
+    ));
 }

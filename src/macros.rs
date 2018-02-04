@@ -42,6 +42,15 @@ macro_rules! consts_seq {
     ($ty:ty, $index:expr $(,)*) => {}
 }
 
+macro_rules! fn_connect_notifier {
+    ($field:ident, $connect:ident, $arg:ty) => {
+        pub fn $connect<F>(&self, callback: F)
+        where F: Fn(&Self, &$arg) + 'static {
+            self.$field.connect(callback);
+        }
+    }
+}
+
 macro_rules! gen_tree_store_indices {
     ($($name:ident),* $(,)*) => {
         pub mod index {

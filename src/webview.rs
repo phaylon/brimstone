@@ -69,6 +69,11 @@ fn on_decide_policy(
         pol_type: webkit2gtk::PolicyDecisionType,
     ) -> bool {
 
+        let page_store = match app.page_store() {
+            Some(store) => store,
+            None => return false,
+        };
+
         if pol_type != webkit2gtk::PolicyDecisionType::NavigationAction {
             return false;
         }
@@ -102,7 +107,7 @@ fn on_decide_policy(
 
         pol_decision.ignore();
         // TODO related to current webview
-        let new_id = app.perform(action::page::Create {
+        let new_id = page_store.insert(page_store::InsertData {
             uri: uri.clone().into(),
             title: Some(uri.into()),
             parent: Some(id),
@@ -135,6 +140,8 @@ fn on_load_changed(
     use webkit2gtk::{ WebViewExt };
     use gio::{ TlsCertificateExt };
 
+    let page_store = try_extract!(app.page_store());
+
     let is_loading = view.is_loading();
 
     let tls_state = if !is_loading {
@@ -161,10 +168,7 @@ fn on_load_changed(
         tls_state,
     };
 
-    app.perform(action::page::LoadStateChange {
-        id,
-        state,
-    });
+    page_store.set_load_state(id, state);
 }
 
 fn on_mouse_target_changed(

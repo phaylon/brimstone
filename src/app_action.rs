@@ -154,7 +154,7 @@ pub fn setup(app: app::Handle) {
         let page_tree_view = try_extract!(app.page_tree_view());
         let id = try_extract!(app.get_active());
         let parent_id = page_store.get_parent(id);
-        let new_id = try_extract!(app.perform(action::page::Create {
+        let new_id = try_extract!(page_store.insert(page_store::InsertData {
             title: None,
             uri: "about:blank".into(),
             parent: parent_id,
@@ -200,6 +200,23 @@ pub fn setup(app: app::Handle) {
             menu.prepend_item(&item);
         });
     }));
+    
+    page_store.on_load_state_change(with_cloned!(app, move |_page_store, &(id, state)| {
+        if app.is_active(id) {
+            adjust_for_load_state(&app, state);
+        }
+    }));
 }
 
+pub fn adjust_for_load_state(app: &app::Handle, state: page_store::LoadState) {
+    use gio::{ SimpleActionExt };
 
+    let app_actions = try_extract!(app.app_actions());
+
+    app_actions.go_back_action.set_enabled(state.can_go_back);
+    app_actions.go_forward_action.set_enabled(state.can_go_forward);
+
+    app_actions.reload_action.set_enabled(!state.is_loading);
+    app_actions.reload_bp_action.set_enabled(!state.is_loading);
+    app_actions.stop_loading_action.set_enabled(state.is_loading);
+}
