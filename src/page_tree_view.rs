@@ -1,54 +1,96 @@
 
+use std::cell;
+
 use gtk;
 use pango;
 
 use app;
 use page_tree_store;
-use action;
 use page_store;
 use mouse;
 use page_context_menu;
+use signal;
 
-pub fn select_id(store: &gtk::TreeStore, view: &gtk::TreeView, id: page_store::Id) {
-    use gtk::{ TreeViewExt, TreeSelectionExt, TreeModelExt };
-
-    let iter = try_extract!(page_tree_store::find_iter_by_id(store, id));
-    let path = try_extract!(store.get_path(&iter));
-    view.expand_to_path(&path);
-    view.get_selection().select_iter(&iter);
+pub struct Map {
+    widget: gtk::TreeView,
+    selection_change_notifier: signal::Notifier<Map, page_store::Id>,
+    page_tree_store: cell::RefCell<Option<gtk::TreeStore>>,
 }
 
-pub fn collapse_id(store: &gtk::TreeStore, view: &gtk::TreeView, id: page_store::Id) {
-    use gtk::{ TreeViewExt, TreeModelExt, Cast };
+impl Map {
 
-    let iter = try_extract!(page_tree_store::find_iter_by_id(store, id));
-    let model: gtk::TreeModel = store.clone().upcast();
-    let path = try_extract!(model.get_path(&iter));
+    fn_connect_notifier!(selection_change_notifier, on_selection_change, page_store::Id);
 
-    view.collapse_row(&path);
+    pub fn new() -> Map {
+        Map {
+            widget: create_tree_view(),
+            selection_change_notifier: signal::Notifier::new(),
+            page_tree_store: cell::RefCell::new(None),
+        }
+    }
+
+    pub fn widget(&self) -> &gtk::TreeView { &self.widget }
+
+    pub fn page_tree_store(&self) -> gtk::TreeStore {
+        let store = self.page_tree_store.borrow();
+        let store = store.as_ref().expect("page_tree_store for page_tree_view");
+        store.clone()
+    }
+
+    pub fn set_page_tree_store(&self, store: &gtk::TreeStore) {
+        use gtk::{ TreeViewExt };
+
+        self.widget.set_model(store);
+        *self.page_tree_store.borrow_mut() = Some(store.clone());
+    }
+
+    pub fn select(&self, id: page_store::Id) {
+        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.page_tree_store(), id));
+        self.select_iter(&iter);
+    }
+
+    pub fn select_iter(&self, iter: &gtk::TreeIter) {
+        use gtk::{ TreeViewExt, TreeModelExt, TreeSelectionExt };
+
+        let path = try_extract!(self.page_tree_store().get_path(iter));
+        self.widget.expand_to_path(&path);
+        self.widget.get_selection().select_iter(&iter);
+    }
+
+    pub fn collapse(&self, id: page_store::Id) {
+        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.page_tree_store(), id));
+        self.collapse_iter(&iter);
+    }
+
+    pub fn collapse_iter(&self, iter: &gtk::TreeIter) {
+        use gtk::{ TreeModelExt, TreeViewExt };
+        
+        let path = try_extract!(self.page_tree_store().get_path(iter));
+        self.widget.collapse_row(&path);
+    }
+
+    pub fn expand(&self, id: page_store::Id, all: bool) {
+        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.page_tree_store(), id));
+        self.expand_iter(&iter, all);
+    }
+
+    pub fn expand_iter(&self, iter: &gtk::TreeIter, all: bool) {
+        use gtk::{ TreeModelExt, TreeViewExt };
+        
+        let path = try_extract!(self.page_tree_store().get_path(iter));
+        self.widget.expand_row(&path, all);
+    }
+
+    pub fn is_expanded(&self, id: page_store::Id) -> bool {
+        use gtk::{ TreeModelExt, TreeViewExt };
+        
+        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.page_tree_store(), id));
+        let path = try_extract!(self.page_tree_store().get_path(&iter));
+        self.widget.row_expanded(&path)
+    }
 }
 
-pub fn expand_id(store: &gtk::TreeStore, view: &gtk::TreeView, id: page_store::Id, all: bool) {
-    use gtk::{ TreeViewExt, TreeModelExt, Cast };
-
-    let iter = try_extract!(page_tree_store::find_iter_by_id(store, id));
-    let model: gtk::TreeModel = store.clone().upcast();
-    let path = try_extract!(model.get_path(&iter));
-
-    view.expand_row(&path, all);
-}
-
-pub fn is_expanded(store: &gtk::TreeStore, view: &gtk::TreeView, id: page_store::Id) -> bool {
-    use gtk::{ TreeViewExt, TreeModelExt, Cast };
-
-    let iter = try_extract!(page_tree_store::find_iter_by_id(store, id));
-    let model: gtk::TreeModel = store.clone().upcast();
-    let path = try_extract!(model.get_path(&iter));
-
-    view.row_expanded(&path)
-}
-
-pub fn create() -> gtk::TreeView {
+pub fn create_tree_view() -> gtk::TreeView {
     use gtk::{
         TreeViewExt, CellLayoutExt, TreeSelectionExt, CellRendererTextExt, TreeViewColumnExt,
     };
@@ -98,31 +140,38 @@ pub fn create() -> gtk::TreeView {
 pub fn setup(app: app::Handle) {
     use gtk::{ TreeViewExt, TreeSelectionExt, WidgetExt };
 
-    let page_tree_view = app.page_tree_view().unwrap();
-    page_tree_view.set_model(&app.page_tree_store().unwrap());
+    let map = app.page_tree_view().unwrap();
+    let page_tree_view = map.widget();
+    map.set_page_tree_store(&app.page_tree_store().unwrap());
 
     page_tree_view.connect_drag_begin(with_cloned!(app, move |_view, _| {
         app.set_select_ignored(true);
     }));
-    page_tree_view.connect_drag_end(with_cloned!(app, move |view, _| {
+    page_tree_view.connect_drag_end(with_cloned!(app, move |_view, _| {
         app.set_select_ignored(false);
-        let store = try_extract!(app.page_tree_store());
+        let page_tree_view = try_extract!(app.page_tree_view());
         let id = try_extract!(app.get_active());
-        select_id(&store, view, id);
+        page_tree_view.select(id);
     }));
 
     page_tree_view.get_selection().connect_changed(with_cloned!(app, move |selection| {
-        let (model, iter) = match selection.get_selected() {
-            None => return,
-            Some(selected) => selected,
-        };
+
+        if app.is_select_ignored() {
+            return;
+        }
+
+        let map = try_extract!(app.page_tree_view());
+        let (model, iter) = try_extract!(selection.get_selected());
         let id = page_tree_store::get_id(&model, &iter);
-        app.perform(action::page::Select { id });
+
+        map.selection_change_notifier.emit(&map, &id);
     }));
 
-    page_tree_view.connect_drag_end(with_cloned!(app, move |view, _| {
+    page_tree_view.connect_drag_end(with_cloned!(app, move |_view, _| {
 
         let page_store = try_extract!(app.page_store());
+        let page_tree_view = try_extract!(app.page_tree_view());
+
         let count = page_store.pinned_count();
         if count == 0 {
             return;
@@ -148,13 +197,12 @@ pub fn setup(app: app::Handle) {
         }
         page_store.session_update_tree();
         if let Some(id) = app.get_active() {
-            select_id(&page_tree_store, view, id);
+            page_tree_view.select(id);
         }
     }));
 
     page_tree_view.connect_button_press_event(with_cloned!(app, move |view, event| {
         use gtk::{ TreeModelExt, MenuExtManual };
-        use page_tree_view;
         
         let (x, y) = event.get_position();
                 
@@ -173,9 +221,10 @@ pub fn setup(app: app::Handle) {
                 app.set_page_tree_target(Some(id));
 
                 let map = try_extract!(app.page_context_menu());
+                let page_tree_view = try_extract!(app.page_tree_view());
                 let has_children = page_store.has_children(id).is_some();
                 let is_pinned = page_store.get_pinned(id);
-                let is_expanded = page_tree_view::is_expanded(&store, view, id);
+                let is_expanded = page_tree_view.is_expanded(id);
 
                 map.update_state(page_context_menu::State {
                     has_children,

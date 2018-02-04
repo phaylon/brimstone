@@ -4,9 +4,8 @@ use gdk;
 
 use app;
 use page_store;
-use action;
 use mouse;
-use page_tree_view;
+use window;
 
 fn on_property_uri_notify(
     app: &app::Handle,
@@ -42,10 +41,11 @@ fn on_property_title_notify(
 
     page_store.set_title(id, title.clone().map(|s| s.into()));
     if app.is_active(id) {
-        app.perform(action::window::SetTitle {
-            title: title.as_ref().map(|title| &title[..]),
-            uri: uri.as_ref().map(|uri| &uri[..]).unwrap_or(""),
-        });
+        window::set_title(
+            app,
+            title.as_ref().map(|val| val.as_str()),
+            uri.as_ref().map(|val| val.as_str()),
+        );
     } else {
         page_store.set_unread(id);
     }
@@ -113,12 +113,11 @@ fn on_decide_policy(
             parent: Some(id),
             position: page_store::InsertPosition::Start,
         }).expect("page creation");
-        let page_tree_store = try_extract!(app.page_tree_store());
         let page_tree_view = try_extract!(app.page_tree_view());
-        page_tree_view::expand_id(&page_tree_store, &page_tree_view, id, false);
+        page_tree_view.expand(id, false);
 
         if select {
-            page_tree_view::select_id(&page_tree_store, &page_tree_view, new_id);
+            page_tree_view.select(new_id);
         }
 
         true
@@ -212,6 +211,27 @@ pub fn create(id: page_store::Id, app: &app::Handle) -> webkit2gtk::WebView {
     }));
 
     new_view
+}
+
+pub fn setup(app: app::Handle) {
+    use gtk::{ WidgetExt, BoxExt };
+
+    let page_tree_view = try_extract!(app.page_tree_view());
+    page_tree_view.on_selection_change(with_cloned!(app, move |_map, &id| {
+        let view_space = try_extract!(app.view_space());
+        let page_store = try_extract!(app.page_store());
+        let view = try_extract!(page_store.get_view(id, &app));
+        match app.active_webview() {
+            Some(webview) => webview.hide(),
+            None => (),
+        }
+        app.set_active(id, view.clone());
+        if view.get_parent().is_none() {
+            view_space.pack_start(&view, true, true, 0);
+        }
+        view_space.show();
+        view.show_all();
+    }));
 }
 
 pub fn create_web_context() -> webkit2gtk::WebContext {

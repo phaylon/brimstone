@@ -47,7 +47,14 @@ pub struct Store {
     load_state_change_notifier: signal::Notifier<Store, (Id, LoadState)>,
 }
 
-pub fn setup(_app: app::Handle) {}
+pub fn setup(app: app::Handle) {
+
+    let page_tree_view = try_extract!(app.page_tree_view());
+    page_tree_view.on_selection_change(with_cloned!(app, move |_map, &id| {
+        let page_store = try_extract!(app.page_store());
+        page_store.set_read(id);
+    }));
+}
 
 impl Store {
 

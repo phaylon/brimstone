@@ -3,6 +3,8 @@ use gtk;
 
 use app;
 
+const APP_NAME: &str = "Brimstone";
+
 pub fn create(app: &gtk::Application) -> gtk::ApplicationWindow {
     use gtk::{ GtkWindowExt };
     
@@ -13,10 +15,25 @@ pub fn create(app: &gtk::Application) -> gtk::ApplicationWindow {
     window
 }
 
+pub fn set_title(app: &app::Handle, title: Option<&str>, uri: Option<&str>) {
+    use gtk::{ GtkWindowExt };
+
+    let title = title.or(uri).unwrap_or("");
+    let window = try_extract!(app.window());
+
+    if title.is_empty() {
+        window.set_title(APP_NAME);
+    } else {
+        window.set_title(&format!("{} - {}", title, APP_NAME));
+    }
+}
+
 pub fn setup(app: app::Handle) {
     use gtk::{ ContainerExt, WidgetExt };
 
     let window = app.window().unwrap();
+    let page_tree_view = app.page_tree_view().unwrap();
+
     window.add(&app.main_paned().unwrap());
 
     window.connect_delete_event(|window, _event| {
@@ -25,6 +42,17 @@ pub fn setup(app: app::Handle) {
             CloseAnswer::Cancel => gtk::prelude::Inhibit(true),
         }
     });
+
+    page_tree_view.on_selection_change(with_cloned!(app, move |_map, &id| {
+        let page_store = try_extract!(app.page_store());
+        let title = page_store.get_title(id);
+        let uri = page_store.get_uri(id);
+        set_title(
+            &app,
+            title.as_ref().map(|val| val.as_str()),
+            uri.as_ref().map(|val| val.as_str()),
+        );
+    }));
 }
 
 pub fn confirm_action(

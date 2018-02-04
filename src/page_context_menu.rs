@@ -4,10 +4,9 @@ use gio;
 
 use app;
 use menu;
-use action;
-use page_tree_view;
 use page_store;
 use text;
+use app_action;
 
 const ACTION_CLOSE: &str = "win.page-ctx-close";
 const ACTION_RELOAD: &str = "win.page-ctx-reload";
@@ -101,13 +100,10 @@ pub fn setup(app: app::Handle) {
     use gio::{ ActionExt };
 
     let map = try_extract!(app.page_context_menu());
-    map.menu().set_property_attach_widget(Some(&try_extract!(app.page_tree_view())));
+    map.menu().set_property_attach_widget(Some(try_extract!(app.page_tree_view()).widget()));
 
     menu::setup_win_action(&app, &map.close_action, true, |app, _| {
-        app.perform(action::page::Close {
-            id: try_extract!(app.get_page_tree_target()),
-            close_children: None,
-        });
+        app_action::try_close_page(&app, try_extract!(app.get_page_tree_target()));
     });
 
     menu::setup_win_action(&app, &map.pin_action, true, |app, action| {
@@ -158,27 +154,21 @@ pub fn setup(app: app::Handle) {
     menu::setup_win_action(&app, &map.expand_action, true, |app, _| {
 
         let id = try_extract!(app.get_page_tree_target());
-        let page_store = try_extract!(app.page_store());
         let page_tree_view = try_extract!(app.page_tree_view());
-
-        page_tree_view::expand_id(&page_store.tree_store(), &page_tree_view, id, false);
+        page_tree_view.expand(id, false);
     });
 
     menu::setup_win_action(&app, &map.expand_all_action, true, |app, _| {
 
         let id = try_extract!(app.get_page_tree_target());
-        let page_store = try_extract!(app.page_store());
         let page_tree_view = try_extract!(app.page_tree_view());
-
-        page_tree_view::expand_id(&page_store.tree_store(), &page_tree_view, id, true);
+        page_tree_view.expand(id, true);
     });
 
     menu::setup_win_action(&app, &map.collapse_action, true, |app, _| {
 
         let id = try_extract!(app.get_page_tree_target());
-        let page_store = try_extract!(app.page_store());
         let page_tree_view = try_extract!(app.page_tree_view());
-
-        page_tree_view::collapse_id(&page_store.tree_store(), &page_tree_view, id);
+        page_tree_view.collapse(id);
     });
 }

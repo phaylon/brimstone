@@ -10,7 +10,6 @@ extern crate webkit2gtk;
 
 #[macro_use] mod macros;
 
-pub mod action;
 pub mod app;
 pub mod app_action;
 pub mod bar;
@@ -88,7 +87,7 @@ fn setup(app: &gtk::Application, app_space: &rc::Rc<cell::RefCell<Option<app::Ap
         application: app.clone(),
         window: window::create(app),
         main_paned: main_paned::create(),
-        page_tree_view: page_tree_view::create(),
+        page_tree_view: rc::Rc::new(page_tree_view::Map::new()),
         navigation_bar: rc::Rc::new(navigation_bar::create()),
         view_space: gtk::Box::new(gtk::Orientation::Horizontal, 0),
         web_context: webview::create_web_context(),
@@ -117,6 +116,7 @@ fn setup(app: &gtk::Application, app_space: &rc::Rc<cell::RefCell<Option<app::Ap
     page_bar::setup(app.handle());
     page_context_menu::setup(app.handle());
     page_store::setup(app.handle());
+    webview::setup(app.handle());
 
     window::present(&app);
 

@@ -2,9 +2,8 @@
 use gio;
 
 use app;
-use action;
 use page_store;
-use page_tree_view;
+use window;
 
 const ACCEL_RELOAD: &str = "<ctrl>r";
 const ACCEL_RELOAD_BP: &str = "<ctrl><shift>r";
@@ -114,6 +113,7 @@ pub fn setup(app: app::Handle) {
     let application = try_extract!(app.application());
     let app_actions = try_extract!(app.app_actions());
     let page_store = try_extract!(app.page_store());
+    let page_tree_view = try_extract!(app.page_tree_view());
 
     application.set_menubar(&app_actions.menu_bar);
 
@@ -150,7 +150,6 @@ pub fn setup(app: app::Handle) {
     menu::setup_action(&app, &app_actions.new_page_action, true, |app| {
 
         let page_store = try_extract!(app.page_store());
-        let page_tree_store = try_extract!(app.page_tree_store());
         let page_tree_view = try_extract!(app.page_tree_view());
         let id = try_extract!(app.get_active());
         let parent_id = page_store.get_parent(id);
@@ -161,7 +160,7 @@ pub fn setup(app: app::Handle) {
             position: page_store::InsertPosition::After(id),
         }));
 
-        page_tree_view::select_id(&page_tree_store, &page_tree_view, new_id);
+        page_tree_view.select(new_id);
 
         let navigation_bar = try_extract!(app.navigation_bar());
         navigation_bar.address_entry().grab_focus();
@@ -172,10 +171,7 @@ pub fn setup(app: app::Handle) {
     });
     application.add_accelerator(ACCEL_FOCUS, ACTION_FOCUS, None);
     menu::setup_action(&app, &app_actions.close_page_action, true, |app| {
-        app.perform(action::page::Close {
-            id: try_extract!(app.get_active()),
-            close_children: None,
-        });
+        try_close_page(&app, try_extract!(app.get_active()));
     });
     menu::setup_param_action(&app, &app_actions.reopen_action, true, |app, id: page_store::Id| {
         let page_store = try_extract!(app.page_store());
@@ -206,9 +202,15 @@ pub fn setup(app: app::Handle) {
             adjust_for_load_state(&app, state);
         }
     }));
+
+    page_tree_view.on_selection_change(with_cloned!(app, move |_map, &id| {
+        let page_store = try_extract!(app.page_store());
+        let load_state = try_extract!(page_store.get_load_state(id));
+        adjust_for_load_state(&app, load_state);
+    }));
 }
 
-pub fn adjust_for_load_state(app: &app::Handle, state: page_store::LoadState) {
+fn adjust_for_load_state(app: &app::Handle, state: page_store::LoadState) {
     use gio::{ SimpleActionExt };
 
     let app_actions = try_extract!(app.app_actions());
@@ -219,4 +221,81 @@ pub fn adjust_for_load_state(app: &app::Handle, state: page_store::LoadState) {
     app_actions.reload_action.set_enabled(!state.is_loading);
     app_actions.reload_bp_action.set_enabled(!state.is_loading);
     app_actions.stop_loading_action.set_enabled(state.is_loading);
+}
+
+fn confirm_close_children(app: &app::Handle, count: i32) -> Option<bool> {
+    
+    let window = try_extract!(app.window());
+
+    const CLOSE_ALL: i32 = 1;
+    const CLOSE_ONE: i32 = 2;
+    const CANCEL: i32 = 3;
+
+    let answer = window::confirm_action(
+        &window,
+        &format!("Do you want to close {} {}?",
+            count,
+            if count == 1 { "page" } else { "pages" },
+        ),
+        &[
+            ("Close Current", CLOSE_ONE),
+            ("Close All", CLOSE_ALL),
+            ("Cancel", CANCEL),
+        ],
+        CLOSE_ONE,
+    );
+    match answer {
+        CLOSE_ALL => Some(true),
+        CLOSE_ONE => Some(false),
+        _ => None,
+    }
+}
+
+fn find_next_selection(app: &app::Handle, parent: Option<page_store::Id>, position: u32)
+-> page_store::Id {
+    
+    let page_store = try_extract!(app.page_store());
+
+    if let Some(id) = page_store.find_previous(parent, position) { id }
+    else if let Some(id) = page_store.find_next_incl(parent, position + 1) { id }
+    else {
+        page_store.insert(page_store::InsertData {
+            uri: "about:blank".into(),
+            title: Some("about:blank".into()),
+            parent: None,
+            position: page_store::InsertPosition::End,
+        }).expect("created fallback page")
+    }
+}
+
+pub fn try_close_page(app: &app::Handle, id: page_store::Id) {
+    use gtk::{ TreeSelectionExt, TreeViewExt };
+
+    let page_store = try_extract!(app.page_store());
+    let page_tree_view = try_extract!(app.page_tree_view());
+
+    let close_children =
+        if let Some(count) = page_store.has_children(id) {
+            try_extract!(confirm_close_children(app, count + 1))
+        } else {
+            false
+        };
+
+    let active_id = app.get_active();
+
+    let position =
+        if Some(id) == active_id {
+            page_store.position(id)
+        } else {
+            None
+        };
+
+    let select = position.map(|(parent, position)| find_next_selection(app, parent, position));
+
+    app.without_select(|| page_store.close(id, close_children));
+    
+    if let Some(select) = select {
+        page_tree_view.widget().get_selection().unselect_all();
+        page_tree_view.select(select);
+    }
 }

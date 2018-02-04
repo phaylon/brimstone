@@ -17,7 +17,12 @@ pub fn setup(app: app::Handle) {
     
     let page_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
     page_box.pack_start(&app.page_bar().unwrap().container(), false, true, 0);
-    page_box.pack_start(&scrolled::create(app.page_tree_view().unwrap()), true, true, 0);
+    page_box.pack_start(
+        &scrolled::create(app.page_tree_view().unwrap().widget().clone()),
+        true,
+        true,
+        0,
+    );
     page_box.pack_start(&app.status_bar().unwrap().page_tree_status(), false, true, 0);
 
     let web_box = gtk::Box::new(gtk::Orientation::Vertical, 0);

@@ -1,6 +1,7 @@
 
 use std::rc;
 use std::ops;
+use std::fmt;
 
 pub fn pluralize<'a, T>(value: T, singular: &'a str, plural: &'a str) -> &'a str
 where T: Into<u64> {
@@ -21,6 +22,13 @@ impl RcString {
     pub fn into_string(&self) -> String { (**self.value).into() }
 
     pub fn as_str(&self) -> &str { &self.value }
+}
+
+impl fmt::Display for RcString {
+
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(&self.value, fmt)
+    }
 }
 
 impl From<String> for RcString {

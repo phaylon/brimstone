@@ -12,12 +12,13 @@ use app_action;
 use status_bar;
 use page_bar;
 use page_context_menu;
+use page_tree_view;
 
 pub struct Data {
     pub application: gtk::Application,
     pub window: gtk::ApplicationWindow,
     pub main_paned: gtk::Paned,
-    pub page_tree_view: gtk::TreeView,
+    pub page_tree_view: rc::Rc<page_tree_view::Map>,
     pub navigation_bar: rc::Rc<navigation_bar::Bar>,
     pub page_store: rc::Rc<page_store::Store>,
     pub view_space: gtk::Box,
@@ -158,8 +159,12 @@ impl Handle {
         self.data.upgrade().map(|data| data.main_paned.clone())
     }
 
-    pub fn page_tree_view(&self) -> Option<gtk::TreeView> {
+    pub fn page_tree_view(&self) -> Option<rc::Rc<page_tree_view::Map>> {
         self.data.upgrade().map(|data| data.page_tree_view.clone())
+    }
+
+    pub fn page_tree_view_widget(&self) -> Option<gtk::TreeView> {
+        self.page_tree_view().map(|map| map.widget().clone())
     }
 
     pub fn bar_size_group(&self) -> Option<gtk::SizeGroup> {
