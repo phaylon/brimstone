@@ -574,14 +574,14 @@ impl Updater {
         Updater { sender, handle }
     }
 
-    pub fn update_title(&self, id: page_store::Id, title: String) {
+    pub fn update_title(&self, id: page_store::Id, title: &str) {
         log_debug!("title update for {} to {:?}", id, &title);
-        self.sender.send(Update::Title { id, title }).unwrap();
+        self.sender.send(Update::Title { id, title: title.into() }).unwrap();
     }
 
-    pub fn update_uri(&self, id: page_store::Id, uri: String) {
+    pub fn update_uri(&self, id: page_store::Id, uri: &str) {
         log_debug!("uri update for {} to {:?}", id, &uri);
-        self.sender.send(Update::Uri { id, uri }).unwrap();
+        self.sender.send(Update::Uri { id, uri: uri.into() }).unwrap();
     }
 
     pub fn update_is_pinned(&self, id: page_store::Id, is_pinned: bool) {
@@ -592,12 +592,12 @@ impl Updater {
     pub fn update_create(
         &self,
         id: page_store::Id,
-        uri: String,
+        uri: &str,
         parent: Option<page_store::Id>,
         position: u32,
     ) {
         log_debug!("creation update for {}", id);
-        self.sender.send(Update::Create { id, uri, parent, position }).unwrap();
+        self.sender.send(Update::Create { id, uri: uri.into(), parent, position }).unwrap();
     }
 
     pub fn update_remove(&self, id: page_store::Id) {

@@ -28,6 +28,9 @@ pub mod menu;
 pub mod page_context_menu;
 pub mod session;
 pub mod recently_closed;
+pub mod signal;
+pub mod text;
+#[path="page_tree_store.rs"] pub mod new_page_tree_store;
 
 use std::rc;
 use std::cell;
@@ -38,6 +41,7 @@ const LOG_DEBUG: usize = 1;
 const LOG_TRACE: usize = 2;
 
 static CURRENT_LOG_LEVEL: sync::atomic::AtomicUsize = sync::atomic::AtomicUsize::new(LOG_OFF);
+
 
 mod_tree_store! {
     page_tree_store:
@@ -50,6 +54,10 @@ mod_tree_store! {
         style: ::pango::Style,
         weight: i32,
         is_pinned: bool,
+    }
+    pub fn set_title(store: &gtk::TreeStore, iter: &gtk::TreeIter, title: &str) {
+        use ::gtk::{ TreeStoreExtManual, ToValue };
+        store.set_value(iter, self::index::title, &title.to_value());
     }
     pub fn find_position(
         store: &gtk::TreeStore,
@@ -112,6 +120,7 @@ mod_tree_store! {
         find_in_children(&store, id, None)
     }
 }
+
 
 fn main() {
     use std::env;

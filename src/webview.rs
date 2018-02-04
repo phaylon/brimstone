@@ -25,7 +25,7 @@ fn on_property_uri_notify(
         nav_bar.address_entry().set_text(&uri);
     }
 
-    page_store.set_uri(id, uri);
+    page_store.set_uri(id, uri.into());
 }
 
 fn on_property_title_notify(
@@ -40,7 +40,7 @@ fn on_property_title_notify(
 
     let page_store = try_extract!(app.page_store());
 
-    page_store.set_title(id, title.clone());
+    page_store.set_title(id, title.clone().map(|s| s.into()));
     if app.is_active(id) {
         app.perform(action::window::SetTitle {
             title: title.as_ref().map(|title| &title[..]),
@@ -103,8 +103,8 @@ fn on_decide_policy(
         pol_decision.ignore();
         // TODO related to current webview
         let new_id = app.perform(action::page::Create {
-            uri: uri.clone(),
-            title: Some(uri),
+            uri: uri.clone().into(),
+            title: Some(uri.into()),
             parent: Some(id),
             position: page_store::InsertPosition::Start,
         }).expect("page creation");

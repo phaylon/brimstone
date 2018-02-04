@@ -27,6 +27,7 @@ pub const ACTION_NEW: &str = "app.new-page";
 pub const ACTION_CLOSE: &str = "app.close-page";
 pub const ACTION_FOCUS: &str = "app.focus";
 pub const ACTION_RECENT_REOPEN: &str = "app.recent-reopen";
+pub const ACTION_REOPEN: &str = "app.reopen";
 
 pub struct Map {
     pub menu_bar: gio::Menu,
@@ -41,9 +42,12 @@ pub struct Map {
     pub focus_action: gio::SimpleAction,
     pub recent_reopen_action: gio::SimpleAction,
     pub recent_menu: gio::Menu,
+    pub reopen_action: gio::SimpleAction,
 }
 
 pub fn create() -> Map {
+    use gtk::{ StaticVariantType };
+
     let recent_menu = gio::Menu::new();
     let menu_bar = create_menu_bar(&recent_menu);
     Map {
@@ -59,6 +63,10 @@ pub fn create() -> Map {
         close_page_action: gio::SimpleAction::new("close-page", None),
         focus_action: gio::SimpleAction::new("focus", None),
         recent_reopen_action: gio::SimpleAction::new("recent-reopen", None),
+        reopen_action: gio::SimpleAction::new(
+            "reopen",
+            Some(&*page_store::Id::static_variant_type()),
+        ),
     }
 }
 
@@ -105,6 +113,7 @@ pub fn setup(app: app::Handle) {
 
     let application = try_extract!(app.application());
     let app_actions = try_extract!(app.app_actions());
+    let page_store = try_extract!(app.page_store());
 
     application.set_menubar(&app_actions.menu_bar);
 
@@ -112,7 +121,7 @@ pub fn setup(app: app::Handle) {
         let window = try_extract!(app.window());
         window.close();
     });
-    menu::setup_action(&app, &app_actions.recent_reopen_action, false, |app| {
+    menu::setup_action(&app, &app_actions.recent_reopen_action, false, |_app| {
     });
     menu::setup_action(&app, &app_actions.go_back_action, false, |app| {
         let webview = try_extract!(app.active_webview());
@@ -168,6 +177,29 @@ pub fn setup(app: app::Handle) {
             close_children: None,
         });
     });
+    menu::setup_param_action(&app, &app_actions.reopen_action, true, |app, id: page_store::Id| {
+        let page_store = try_extract!(app.page_store());
+        let page = try_extract!(page_store.recently_closed_state().pull(id));
+        let parent = page_store
+            .find_first_existing(page.position.iter().filter_map(|par| par.0));
+    });
+
+    page_store.recently_closed_state().on_change(with_cloned!(app, move |state, _| {
+        use gio::{ MenuItemExt, MenuExt };
+        use gtk::{ ToVariant };
+
+        let app_actions = try_extract!(app.app_actions());
+        let menu = &app_actions.recent_menu;
+        menu.remove_all();
+        state.iterate_pages(|page| {
+            let item = match page.title {
+                Some(ref title) => gio::MenuItem::new(title.as_str(), None),
+                None => gio::MenuItem::new(page.uri.as_str(), None),
+            };
+            item.set_action_and_target_value(ACTION_REOPEN, Some(&page.id.to_variant()));
+            menu.prepend_item(&item);
+        });
+    }));
 }
 
 

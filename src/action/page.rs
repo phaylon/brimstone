@@ -6,6 +6,7 @@ use page_store;
 use action;
 use page_tree_view;
 use window;
+use text;
 
 pub struct UpdateCounter;
 
@@ -108,8 +109,8 @@ impl app::Perform for Close {
 }
 
 pub struct Create {
-    pub uri: String,
-    pub title: Option<String>,
+    pub uri: text::RcString,
+    pub title: Option<text::RcString>,
     pub parent: Option<page_store::Id>,
     pub position: page_store::InsertPosition,
 }
@@ -173,7 +174,7 @@ impl app::Perform for Select {
         });
         nav_bar.address_entry().set_text(&match page_store.get_uri(self.id) {
             Some(uri) => uri,
-            None => String::new(),
+            None => text::RcString::new(),
         });
         if new_view.get_parent().is_none() {
             view_space.pack_start(&new_view, true, true, 0);

@@ -13,6 +13,7 @@ use app;
 use page_tree_store;
 use session;
 use recently_closed;
+use text;
 
 pub type Id = u32;
 
@@ -85,8 +86,8 @@ impl Store {
                 let session::NodeInfo { title, uri, is_pinned } = info;
                 entries.push(Entry {
                     id: child.borrow().id,
-                    uri: uri.clone(),
-                    title: title.clone(),
+                    uri: uri.clone().into(),
+                    title: title.clone().map(|v| v.into()),
                     view: None,
                     favicon: None,
                     is_noclose: false,
@@ -150,6 +151,8 @@ impl Store {
             recently_closed: recently_closed::State::new(),
         }
     }
+
+    pub fn recently_closed_state(&self) -> &recently_closed::State { &self.recently_closed }
 
     pub fn session_update_tree(&self) {
         let tree_store = &self.tree_store;
@@ -331,6 +334,18 @@ impl Store {
         children
     }
 
+    pub fn find_first_existing<I>(&self, ids: I) -> Option<Id>
+    where I: Iterator<Item=Id> {
+        for id in ids {
+            for entry in self.entries.borrow().iter() {
+                if entry.id == id {
+                    return Some(id);
+                }
+            }
+        }
+        None
+    }
+
     pub fn close(&self, id: Id, close_children: bool) {
         use gtk::{ Cast, TreeStoreExt, ContainerExt, WidgetExt, TreeModelExt };
 
@@ -437,11 +452,11 @@ impl Store {
         self.move_iter_to(iter, parent_iter.as_ref(), position);
     }
 
-    pub fn get_uri(&self, id: Id) -> Option<String> {
+    pub fn get_uri(&self, id: Id) -> Option<text::RcString> {
         self.map_entry(id, |entry| entry.uri.clone())
     }
 
-    pub fn get_title(&self, id: Id) -> Option<String> {
+    pub fn get_title(&self, id: Id) -> Option<text::RcString> {
         self.map_entry(id, |entry| match entry.title {
             Some(ref title) => title.clone(),
             None => entry.uri.clone(),
@@ -451,27 +466,27 @@ impl Store {
     fn update_tree_title(&self, id: Id) {
         if let Some(iter) = page_tree_store::find_iter_by_id(&self.tree_store, id) {
             let title = self.get_title(id);
-            page_tree_store::set::title(&self.tree_store, &iter, match title {
+            page_tree_store::set_title(&self.tree_store, &iter, &match title {
                 Some(ref title) =>
                     if title.is_empty() {
-                        self.get_uri(id).unwrap_or_else(|| String::new())
+                        self.get_uri(id).unwrap_or_else(|| text::RcString::new())
                     } else {
                         title.clone()
                     },
-                None => self.get_uri(id).unwrap_or_else(|| String::new()),
+                None => self.get_uri(id).unwrap_or_else(|| text::RcString::new()),
             });
         }
     }
 
-    pub fn set_uri(&self, id: Id, value: String) {
-        self.session_update(|session| session.update_uri(id, value.clone()));
+    pub fn set_uri(&self, id: Id, value: text::RcString) {
+        self.session_update(|session| session.update_uri(id, &value));
         self.map_entry_mut(id, |entry| entry.uri = value);
         self.update_tree_title(id);
     }
 
-    pub fn set_title(&self, id: Id, value: Option<String>) {
+    pub fn set_title(&self, id: Id, value: Option<text::RcString>) {
         self.session_update(|session|
-            session.update_title(id, value.clone().unwrap_or_else(|| String::new()))
+            session.update_title(id, &value.clone().unwrap_or_else(|| text::RcString::new()))
         );
         self.map_entry_mut(id, |entry| entry.title = value);
         self.update_tree_title(id);
@@ -593,14 +608,14 @@ impl Store {
             }
             position
         };
-        let title = title.unwrap_or_else(|| String::new());
+        let title = title.unwrap_or_else(|| text::RcString::new());
         page_tree_store::insert(
             &self.tree_store,
             parent_iter.clone(),
             Some(position),
             page_tree_store::Entry {
                 id,
-                title: title.clone(),
+                title: title.into_string(),
                 child_info: "".into(),
                 has_children: false,
                 child_count: 0,
@@ -609,7 +624,7 @@ impl Store {
                 is_pinned: false,
             },
         );
-        self.session_update(|session| session.update_create(id, uri, parent, position));
+        self.session_update(|session| session.update_create(id, &uri, parent, position));
         if let Some(ref iter) = parent_iter {
             self.recalc(iter);
         }
@@ -633,16 +648,16 @@ pub enum InsertPosition {
 }
 
 pub struct InsertData {
-    pub uri: String,
-    pub title: Option<String>,
+    pub uri: text::RcString,
+    pub title: Option<text::RcString>,
     pub parent: Option<Id>,
     pub position: InsertPosition,
 }
 
 struct Entry {
     id: Id,
-    uri: String,
-    title: Option<String>,
+    uri: text::RcString,
+    title: Option<text::RcString>,
     view: Option<webkit2gtk::WebView>,
     load_state: LoadState,
     favicon: Option<cairo::Surface>,

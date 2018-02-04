@@ -7,6 +7,7 @@ use menu;
 use action;
 use page_tree_view;
 use page_store;
+use text;
 
 const ACTION_CLOSE: &str = "win.page-ctx-close";
 const ACTION_RELOAD: &str = "win.page-ctx-reload";
@@ -129,7 +130,7 @@ pub fn setup(app: app::Handle) {
         let uri = page_store.get_uri(id);
         let title = page_store.get_title(id);
         app.perform(action::page::Create {
-            uri: uri.unwrap_or_else(|| String::new()),
+            uri: uri.unwrap_or_else(|| text::RcString::new()),
             title,
             parent,
             position: page_store::InsertPosition::After(id),

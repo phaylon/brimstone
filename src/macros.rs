@@ -42,6 +42,108 @@ macro_rules! consts_seq {
     ($ty:ty, $index:expr $(,)*) => {}
 }
 
+macro_rules! gen_tree_store_indices {
+    ($($name:ident),* $(,)*) => {
+        pub mod index {
+            consts_seq!(u32, 0, $($name),*);
+        }
+    }
+}
+
+macro_rules! gen_tree_store_create {
+    ($($ty:ty),* $(,)*) => {
+        pub fn create() -> ::gtk::TreeStore {
+            ::gtk::TreeStore::new(&[
+                $(<$ty as ::gtk::StaticType>::static_type()),*
+            ])
+        }
+    }
+}
+
+macro_rules! gen_tree_store_insert {
+    ($($name:ident: $index:ident),* $(,)*) => {
+        pub fn insert(
+            store: &::gtk::TreeStore,
+            parent: Option<&::gtk::TreeIter>,
+            position: Option<u32>,
+            entry: Entry,
+        ) -> ::gtk::TreeIter {
+            use ::gtk::{ TreeStoreExtManual };
+
+            store.insert_with_values(
+                parent,
+                position,
+                &[$(self::index::$index),*],
+                &[$(&entry.$name),*],
+            )
+        }
+    }
+}
+
+macro_rules! gen_tree_store_getter {
+    ($name:ident, $index:ident, $ty:ty) => {
+        pub fn $name(store: &::gtk::TreeStore, iter: &::gtk::TreeIter) -> $ty {
+            use ::gtk::{ TreeModelExt };
+            store.get_value(iter, self::index::$index as i32).get().unwrap()
+        }
+    }
+}
+
+macro_rules! gen_tree_store_setter {
+    ($name:ident, $index:ident, $ty:ty) => {
+        pub fn $name(store: &::gtk::TreeStore, iter: &::gtk::TreeIter, value: $ty) {
+            use ::gtk::{ TreeStoreExtManual, ToValue };
+            store.set_value(iter, self::index::$index, &value.to_value());
+        }
+    }
+}
+
+macro_rules! gen_tree_store_entry_struct {
+    ($($name:ident: $settype:ty),* $(,)*) => {
+        pub struct Entry {
+            $($name: $settype),*
+        }
+    }
+}
+
+macro_rules! gen_tree_store_entry {
+    ($(($name:ident, set($set:ident: $settype:ty))),* $(,)*) => {
+        gen_tree_store_entry_struct!($($name: $settype),*);
+    };
+    ($(($name:ident, get($get:ident: $gettype:ty), set($set:ident: $settype:ty))),* $(,)*) => {
+        gen_tree_store_entry_struct!($($name: $settype),*);
+    };
+    ($(($name:ident, set($set:ident: $settype:ty), get($get:ident: $gettype:ty))),* $(,)*) => {
+        gen_tree_store_entry_struct!($($name: $settype),*);
+    }
+}
+
+macro_rules! gen_tree_store_accessors {
+    ($index:ident, set($set:ident: $settype:ty) $(,)*) => {
+        gen_tree_store_setter!($set, $index, $settype);
+    };
+    ($index:ident, get($get:ident: $gettype:ty), set($set:ident: $settype:ty) $(,)*) => {
+        gen_tree_store_getter!($get, $index, $gettype);
+        gen_tree_store_setter!($set, $index, $settype);
+    };
+    ($index:ident, set($set:ident: $settype:ty), get($get:ident: $gettype:ty) $(,)*) => {
+        gen_tree_store_getter!($get, $index, $gettype);
+        gen_tree_store_setter!($set, $index, $settype);
+    }
+}
+
+macro_rules! gen_tree_store {
+    ($(( $name:ident: $ty:ty, $index:ident, $($rest:tt)*)),* $(,)*) => {
+        gen_tree_store_indices!($($index),*);
+        gen_tree_store_entry!($(($name, $($rest)*)),*);
+        gen_tree_store_create!($($ty),*);
+        gen_tree_store_insert!($($name: $index),*);
+        $(
+            gen_tree_store_accessors!($index, $($rest)*);
+        )*
+    }
+}
+
 macro_rules! mod_tree_store {
     (   $name:ident:
         struct { $($fname:ident: $ftype:ty),* $(,)* }

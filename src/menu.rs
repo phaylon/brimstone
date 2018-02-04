@@ -1,5 +1,6 @@
 
 use gio;
+use glib;
 
 use app;
 
@@ -50,6 +51,28 @@ pub fn setup_win_action<F>(
     action.set_enabled(enabled);
 
     window.add_action(action);
+}
+
+pub fn setup_param_action<F, T>(
+    app: &app::Handle,
+    action: &gio::SimpleAction,
+    enabled: bool,
+    activate: F,
+) where
+    F: Fn(&app::Handle, T) + 'static,
+    T: glib::variant::FromVariant,
+{
+    use gio::{ SimpleActionExt, ActionMapExt };
+
+    let application = try_extract!(app.application());
+
+    let app = app.clone();
+    action.connect_activate(move |_, param|
+        activate(&app, param.as_ref().and_then(|var| var.get()).unwrap())
+    );
+    action.set_enabled(enabled);
+
+    application.add_action(action);
 }
 
 pub fn setup_action<F>(
