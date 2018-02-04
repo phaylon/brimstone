@@ -59,13 +59,13 @@ pub fn create() -> gtk::TreeView {
         title_cell.set_property_ellipsize(pango::EllipsizeMode::End);
         title_column.pack_start(&title_cell, true);
         title_column.add_attribute(&title_cell,
-            "text", page_tree_store::index::title as i32);
+            "text", page_tree_store::index::TITLE as i32);
         title_column.add_attribute(&title_cell,
-            "style", page_tree_store::index::style as i32);
+            "style", page_tree_store::index::STYLE as i32);
         title_column.add_attribute(&title_cell,
-            "weight", page_tree_store::index::weight as i32);
+            "weight", page_tree_store::index::WEIGHT as i32);
         title_column.add_attribute(&title_cell,
-            "underline", page_tree_store::index::is_pinned as i32);
+            "underline", page_tree_store::index::IS_PINNED as i32);
         title_column.set_expand(true);
         title_column
     };
@@ -75,9 +75,9 @@ pub fn create() -> gtk::TreeView {
         let children_cell = gtk::CellRendererText::new();
         children_column.pack_end(&children_cell, false);
         children_column.add_attribute(&children_cell,
-            "text", page_tree_store::index::child_info as i32);
+            "text", page_tree_store::index::CHILD_INFO as i32);
         children_column.add_attribute(&children_cell,
-            "visible", page_tree_store::index::has_children as i32);
+            "visible", page_tree_store::index::HAS_CHILDREN as i32);
         children_column
     };
 
@@ -85,7 +85,7 @@ pub fn create() -> gtk::TreeView {
     view.append_column(&title_column);
     view.append_column(&children_column);
     view.set_expander_column(&title_column);
-    view.set_tooltip_column(page_tree_store::index::title as i32);
+    view.set_tooltip_column(page_tree_store::index::TITLE as i32);
     view.set_enable_tree_lines(true);
     view.set_headers_visible(false);
     view.set_show_expanders(true);
@@ -116,12 +116,11 @@ pub fn setup(app: app::Handle) {
             None => return,
             Some(selected) => selected,
         };
-        let id = page_tree_store::get::id(&model, &iter);
+        let id = page_tree_store::get_id(&model, &iter);
         app.perform(action::page::Select { id });
     }));
 
     page_tree_view.connect_drag_end(with_cloned!(app, move |view, _| {
-        use gtk::{ Cast };
 
         let page_store = try_extract!(app.page_store());
         let count = page_store.pinned_count();
@@ -129,12 +128,11 @@ pub fn setup(app: app::Handle) {
             return;
         }
         let page_tree_store = page_store.tree_store();
-        let model = page_tree_store.clone().upcast();
         let mut seen = 0;
         let mut misplaced = Vec::new();
         let mut last_position = 0;
         for (child_id, child_iter) in page_store.children(None) {
-            if page_tree_store::get::is_pinned(&model, &child_iter) {
+            if page_tree_store::get_is_pinned(page_tree_store, &child_iter) {
                 seen += 1;
                 if seen == count {
                     break;
@@ -155,7 +153,7 @@ pub fn setup(app: app::Handle) {
     }));
 
     page_tree_view.connect_button_press_event(with_cloned!(app, move |view, event| {
-        use gtk::{ TreeModelExt, Cast, MenuExtManual };
+        use gtk::{ TreeModelExt, MenuExtManual };
         use page_tree_view;
         
         let (x, y) = event.get_position();
@@ -170,8 +168,7 @@ pub fn setup(app: app::Handle) {
                 let store = try_extract!(app.page_tree_store());
                 let iter = try_extract!(view.get_model().unwrap().get_iter(&path));
                 let page_store = try_extract!(app.page_store());
-                let model = store.clone().upcast();
-                let id = page_tree_store::get::id(&model, &iter);
+                let id = page_tree_store::get_id(&store, &iter);
 
                 app.set_page_tree_target(Some(id));
 
@@ -193,8 +190,7 @@ pub fn setup(app: app::Handle) {
                 let store = try_extract!(app.page_tree_store());
                 let iter = try_extract!(view.get_model().unwrap().get_iter(&path));
                 let page_store = try_extract!(app.page_store());
-                let model = store.clone().upcast();
-                let id = page_tree_store::get::id(&model, &iter);
+                let id = page_tree_store::get_id(&store, &iter);
                 let is_pinned = page_store.get_pinned(id);
                 view.set_reorderable(!is_pinned);
             })();

@@ -630,27 +630,27 @@ struct Tree {
 impl Tree {
 
     fn from_page_tree_store(page_tree_store: &gtk::TreeStore) -> Tree {
-        use gtk::{ TreeModelExt, Cast };
+        use gtk::{ TreeModelExt };
         use page_tree_store;
 
         log_trace!("collecting tree structure");
 
         fn populate(
-            model: &gtk::TreeModel,
+            store: &gtk::TreeStore,
             nodes: &mut TreeNodes,
             parent: Option<&gtk::TreeIter>,
             parent_id: Option<page_store::Id>,
         ) {
-            for index in 0..model.iter_n_children(parent) {
-                let iter = model.iter_nth_child(parent, index).unwrap();
-                let id = page_tree_store::get::id(&model, &iter);
+            for index in 0..store.iter_n_children(parent) {
+                let iter = store.iter_nth_child(parent, index).unwrap();
+                let id = page_tree_store::get_id(store, &iter);
                 nodes.push((id, parent_id, index as u32));
-                populate(model, nodes, Some(&iter), Some(id));
+                populate(store, nodes, Some(&iter), Some(id));
             }
         }
 
         let mut nodes = Vec::new();
-        populate(&page_tree_store.clone().upcast(), &mut nodes, None, None);
+        populate(page_tree_store, &mut nodes, None, None);
         
         log_trace!("tree structure collected");
 

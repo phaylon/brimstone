@@ -30,7 +30,7 @@ pub mod session;
 pub mod recently_closed;
 pub mod signal;
 pub mod text;
-#[path="page_tree_store.rs"] pub mod new_page_tree_store;
+pub mod page_tree_store;
 
 use std::rc;
 use std::cell;
@@ -42,7 +42,7 @@ const LOG_TRACE: usize = 2;
 
 static CURRENT_LOG_LEVEL: sync::atomic::AtomicUsize = sync::atomic::AtomicUsize::new(LOG_OFF);
 
-
+/*
 mod_tree_store! {
     page_tree_store:
     struct {
@@ -120,6 +120,7 @@ mod_tree_store! {
         find_in_children(&store, id, None)
     }
 }
+*/
 
 
 fn main() {

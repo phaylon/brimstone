@@ -47,19 +47,17 @@ pub struct Store {
 pub fn setup(_app: app::Handle) {}
 
 fn recalc(tree_store: &gtk::TreeStore, iter: &gtk::TreeIter) {
-    use gtk::{ TreeModelExt, Cast };
-
-    let model = tree_store.clone().upcast();
+    use gtk::{ TreeModelExt };
     
     let mut sum = 0;
     for index in 0..tree_store.iter_n_children(iter) {
         let child_iter = tree_store.iter_nth_child(iter, index).unwrap();
-        sum += 1 + page_tree_store::get::child_count(&model, &child_iter);
+        sum += 1 + page_tree_store::get_child_count(tree_store, &child_iter);
     }
 
-    page_tree_store::set::child_count(tree_store, iter, sum);
-    page_tree_store::set::has_children(tree_store, iter, sum > 0);
-    page_tree_store::set::child_info(tree_store, iter, format!("({})", sum));
+    page_tree_store::set_child_count(tree_store, iter, sum);
+    page_tree_store::set_has_children(tree_store, iter, sum > 0);
+    page_tree_store::set_child_info(tree_store, iter, &format!("({})", sum));
 
     if let Some(parent_iter) = tree_store.iter_parent(iter) {
         recalc(tree_store, &parent_iter);
@@ -101,7 +99,7 @@ impl Store {
                 });
                 let iter = page_tree_store::insert(
                     tree_store,
-                    parent.map(|iter| iter.clone()),
+                    parent,
                     None,
                     page_tree_store::Entry {
                         id: child.borrow().id,
@@ -165,12 +163,12 @@ impl Store {
 
     pub fn set_unread(&self, id: Id) {
         let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
-        page_tree_store::set::weight(&self.tree_store, &iter, TITLE_WEIGHT_UNREAD);
+        page_tree_store::set_weight(&self.tree_store, &iter, TITLE_WEIGHT_UNREAD);
     }
 
     pub fn set_read(&self, id: Id) {
         let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
-        page_tree_store::set::weight(&self.tree_store, &iter, TITLE_WEIGHT_DEFAULT);
+        page_tree_store::set_weight(&self.tree_store, &iter, TITLE_WEIGHT_DEFAULT);
     }
 
     fn session_update<F>(&self, body: F) where F: FnOnce(&session::Updater) {
@@ -186,7 +184,7 @@ impl Store {
         let old_parent = self.tree_store.iter_parent(&iter);
 
         self.map_entry_mut(id, |entry| entry.is_pinned = is_pinned);
-        page_tree_store::set::is_pinned(&self.tree_store, &iter, is_pinned);
+        page_tree_store::set_is_pinned(&self.tree_store, &iter, is_pinned);
         let count = self.pinned.borrow().len();
         if is_pinned {
             self.move_to(id, None, count as i32);
@@ -245,31 +243,31 @@ impl Store {
     }
 
     pub fn get_parent(&self, id: Id) -> Option<Id> {
-        use gtk::{ TreeModelExt, Cast };
+        use gtk::{ TreeModelExt };
 
         let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
         let parent_iter = try_extract!(self.tree_store.iter_parent(&iter));
-        let model = self.tree_store.clone().upcast();
-        Some(page_tree_store::get::id(&model, &parent_iter))
+        Some(page_tree_store::get_id(&self.tree_store, &parent_iter))
     }
 
     pub fn position(&self, id: Id) -> Option<(Option<Id>, u32)> {
-        let parent = self.get_parent(id);
-        let position = try_extract!(page_tree_store::find_position(&self.tree_store, id, parent));
-        Some((parent, position))
+        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
+        page_tree_store::find_position(&self.tree_store, &iter).map(|(parent, position)| (
+            parent.map(|iter| page_tree_store::get_id(&self.tree_store, &iter)),
+            position,
+        ))
     }
 
     pub fn nth_child(&self, parent: Option<Id>, index: u32) -> Option<Id> {
-        use gtk::{ TreeModelExt, Cast };
+        use gtk::{ TreeModelExt };
 
-        let model: gtk::TreeModel = self.tree_store.clone().upcast();
         let parent_iter = parent
             .map(|id| page_tree_store::find_iter_by_id(&self.tree_store, id).unwrap());
-        let child_iter = match model.iter_nth_child(parent_iter.as_ref(), index as i32) {
+        let child_iter = match self.tree_store.iter_nth_child(parent_iter.as_ref(), index as i32) {
             Some(child) => child,
             None => return None,
         };
-        let child_id: Id = page_tree_store::get::id(&model, &child_iter);
+        let child_id: Id = page_tree_store::get_id(&self.tree_store, &child_iter);
         Some(child_id)
     }
 
@@ -321,14 +319,13 @@ impl Store {
     }
 
     pub fn children(&self, parent: Option<&gtk::TreeIter>) -> Vec<(Id, gtk::TreeIter)> {
-        use gtk::{ TreeModelExt, Cast };
+        use gtk::{ TreeModelExt };
 
-        let model: gtk::TreeModel = self.tree_store.clone().upcast();
         let mut children = Vec::new();
-        let count = model.iter_n_children(parent);
+        let count = self.tree_store.iter_n_children(parent);
         for index in 0..count {
-            let child = model.iter_nth_child(parent, index).expect("child iter");
-            let child_id: Id = page_tree_store::get::id(&model, &child);
+            let child = self.tree_store.iter_nth_child(parent, index).expect("child iter");
+            let child_id: Id = page_tree_store::get_id(&self.tree_store, &child);
             children.push((child_id, child));
         }
         children
@@ -351,13 +348,12 @@ impl Store {
 
         fn deep_close(
             page_store: &Store,
-            model: &gtk::TreeModel,
             store: &gtk::TreeStore,
             iter: &gtk::TreeIter,
         ) {
-            let id: Id = page_tree_store::get::id(&model, &iter);
+            let id = page_tree_store::get_id(store, &iter);
             for (_child_id, child_iter) in page_store.children(Some(iter)) {
-                deep_close(page_store, model, store, &child_iter);
+                deep_close(page_store, store, &child_iter);
             }
 
             let mut entries = page_store.entries.borrow_mut();
@@ -391,7 +387,6 @@ impl Store {
             }
         }
         
-        let model = self.tree_store.clone().upcast();
         let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
 
         if !close_children {
@@ -409,7 +404,7 @@ impl Store {
 
         let parent_iter = self.tree_store.iter_parent(&iter);
 
-        deep_close(self, &model, &self.tree_store, &iter);
+        deep_close(self, &self.tree_store, &iter);
         self.session_update(|session| session.update_tree(&self.tree_store));
 
         if let Some(parent_iter) = parent_iter {
@@ -551,7 +546,7 @@ impl Store {
         let ret_view = new_view.clone();
         self.map_entry_mut(id, move |entry| entry.view = Some(new_view));
         let iter = page_tree_store::find_iter_by_id(&self.tree_store, id).unwrap();
-        page_tree_store::set::style(&self.tree_store, &iter, pango::Style::Normal);
+        page_tree_store::set_style(&self.tree_store, &iter, pango::Style::Normal);
         Some(ret_view)
     }
 
@@ -594,13 +589,24 @@ impl Store {
             let mut position = match position {
                 InsertPosition::Start => 0,
                 InsertPosition::End => end_index,
-                InsertPosition::Before(id) =>
-                    page_tree_store::find_position(&self.tree_store, id, parent)
-                        .unwrap_or(end_index),
-                InsertPosition::After(id) =>
-                    page_tree_store::find_position(&self.tree_store, id, parent)
-                        .map(|pos| pos + 1)
-                        .unwrap_or(end_index),
+                InsertPosition::Before(id) => self.position(id)
+                    .and_then(|(position_parent, position)| {
+                        if position_parent == parent {
+                            Some(position)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(end_index),
+                InsertPosition::After(id) => self.position(id)
+                    .and_then(|(position_parent, position)| {
+                        if position_parent == parent {
+                            Some(position + 1)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(end_index),
             };
             if parent_iter.is_none() {
                 let pin_count = self.pinned.borrow().len() as u32;
@@ -611,7 +617,7 @@ impl Store {
         let title = title.unwrap_or_else(|| text::RcString::new());
         page_tree_store::insert(
             &self.tree_store,
-            parent_iter.clone(),
+            parent_iter.as_ref(),
             Some(position),
             page_tree_store::Entry {
                 id,
