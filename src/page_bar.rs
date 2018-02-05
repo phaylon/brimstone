@@ -6,6 +6,7 @@ use gtk;
 use app;
 use app_action;
 use bar;
+use mouse;
 
 pub struct Bar {
     container: gtk::Box,
@@ -35,7 +36,7 @@ pub fn create() -> Bar {
 }
 
 pub fn setup(app: app::Handle) {
-    use gtk::{ BoxExt, ActionableExt, SizeGroupExt };
+    use gtk::{ BoxExt, ActionableExt, SizeGroupExt, WidgetExt };
 
     let bar = app.page_bar().unwrap().bar;
     bar.container.pack_start(&bar.add_page_button, false, true, 0);
@@ -45,4 +46,11 @@ pub fn setup(app: app::Handle) {
     
     bar.add_page_button.set_action_name(Some(app_action::ACTION_NEW));
     bar.remove_page_button.set_action_name(Some(app_action::ACTION_CLOSE));
+
+    bar.add_page_button.connect_button_release_event(with_cloned!(app, move |_button, event| {
+        if event.get_button() == mouse::BUTTON_MIDDLE {
+            app_action::create_new_page(&app, app_action::CreateMode::Child);
+        }
+        gtk::prelude::Inhibit(false)
+    }));
 }

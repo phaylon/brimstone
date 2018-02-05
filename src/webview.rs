@@ -106,7 +106,6 @@ fn on_decide_policy(
         };
 
         pol_decision.ignore();
-        // TODO related to current webview
         let new_id = page_store.insert(page_store::InsertData {
             uri: uri.clone().into(),
             title: Some(uri.into()),

@@ -2,6 +2,7 @@
 use std::rc;
 use std::cell;
 use std::cmp;
+use std::collections;
 
 use gtk;
 use webkit2gtk;
@@ -38,7 +39,7 @@ pub enum TlsState {
 
 pub struct Store {
     last_id: cell::Cell<Id>,
-    entries: rc::Rc<cell::RefCell<Vec<Entry>>>,
+    entries: rc::Rc<cell::RefCell<collections::HashMap<Id, Entry>>>,
     pinned: cell::RefCell<Vec<Id>>,
     tree_store: gtk::TreeStore,
     session: Option<session::Updater>,
@@ -67,7 +68,7 @@ impl Store {
         fn populate(
             parent: Option<&gtk::TreeIter>,
             children: &session::Nodes,
-            entries: &mut Vec<Entry>,
+            entries: &mut collections::HashMap<Id, Entry>,
             tree_store: &gtk::TreeStore,
         ) {
             for child in children {
@@ -77,8 +78,9 @@ impl Store {
                     is_pinned: false,
                 });
                 let session::NodeInfo { title, uri, is_pinned } = info;
-                entries.push(Entry {
-                    id: child.borrow().id,
+                let id = child.borrow().id;
+                entries.insert(id, Entry {
+                    id,
                     uri: uri.clone().into(),
                     title: title.clone().map(|v| v.into()),
                     view: None,
@@ -97,7 +99,7 @@ impl Store {
                     parent,
                     None,
                     page_tree_store::Entry {
-                        id: child.borrow().id,
+                        id,
                         title: text::escape(&title.unwrap_or_else(|| uri)).into(),
                         child_info: "".into(),
                         has_children: false,
@@ -116,7 +118,7 @@ impl Store {
         let pinned = session.find_pinned_ids();
         let tree = session.load_tree().unwrap();
 
-        let mut entries = Vec::new();
+        let mut entries = collections::HashMap::new();
         let tree_store = page_tree_store::create();
 
         log_debug!("populating store from session");
@@ -139,7 +141,7 @@ impl Store {
     pub fn new_stateless() -> Store {
         Store {
             last_id: cell::Cell::new(0),
-            entries: rc::Rc::new(cell::RefCell::new(Vec::new())),
+            entries: rc::Rc::new(cell::RefCell::new(collections::HashMap::new())),
             tree_store: page_tree_store::create(),
             pinned: cell::RefCell::new(Vec::new()),
             session: None,
@@ -331,12 +333,7 @@ impl Store {
     }
 
     pub fn exists(&self, id: Id) -> bool {
-        for entry in self.entries.borrow().iter() {
-            if entry.id == id {
-                return true;
-            }
-        }
-        false
+        self.entries.borrow().contains_key(&id)
     }
 
     pub fn close(&self, id: Id, close_children: bool) {
@@ -353,8 +350,9 @@ impl Store {
             }
 
             let mut entries = page_store.entries.borrow_mut();
-            let index = entries.iter().position(|entry| entry.id == id).unwrap();
-            let entry = entries.remove(index);
+            //let index = entries.iter().position(|entry| entry.id == id).unwrap();
+            //let entry = entries.remove(index);
+            let entry = entries.remove(&id).unwrap();
             page_store.recently_closed.push(recently_closed::Page {
                 id,
                 title: entry.title,
@@ -513,7 +511,7 @@ impl Store {
 
     fn map_entry_mut<F, R>(&self, id: Id, callback: F) -> Option<R>
     where F: FnOnce(&mut Entry) -> R {
-        for entry in self.entries.borrow_mut().iter_mut() {
+        for entry in self.entries.borrow_mut().values_mut() {
             if entry.id == id {
                 return Some(callback(entry));
             }
@@ -523,7 +521,7 @@ impl Store {
 
     fn map_entry<F, R>(&self, id: Id, callback: F) -> Option<R>
     where F: FnOnce(&Entry) -> R {
-        for entry in self.entries.borrow().iter() {
+        for entry in self.entries.borrow().values() {
             if entry.id == id {
                 return Some(callback(entry));
             }
@@ -577,7 +575,7 @@ impl Store {
             ))),
             None => None,
         };
-        self.entries.borrow_mut().push(Entry {
+        self.entries.borrow_mut().insert(id, Entry {
             id,
             uri: uri.clone(),
             title: title.clone(),

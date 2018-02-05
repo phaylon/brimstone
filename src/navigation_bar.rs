@@ -136,14 +136,14 @@ pub fn setup(app: app::Handle) {
     bar.stop_button.set_action_name(Some(app_action::ACTION_STOP));
 
     bar.reload_button.connect_button_release_event(with_cloned!(app, move |_button, event| {
-        (||{
+        fn_scope! {
             let app_actions = try_extract!(app.app_actions());
             if event.get_state() == gdk::ModifierType::SHIFT_MASK {
                 app_actions.reload_bp_action.activate(None);
             } else {
                 app_actions.reload_action.activate(None);
             }
-        })();
+        };
         gtk::prelude::Inhibit(false)
     }));
 

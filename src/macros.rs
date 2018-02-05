@@ -3,6 +3,10 @@ macro_rules! try_extract {
     ($src:expr) => { match $src { Some(value) => value, None => return Default::default() } }
 }
 
+macro_rules! fn_scope {
+    ($($body:tt)*) => { (||{$($body)*})() }
+}
+
 macro_rules! with_cloned {
     ($var:ident, $body:expr $(,)*) => {
         with_cloned!($var, $var, $body);

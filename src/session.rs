@@ -50,6 +50,8 @@ impl From<OpenStorageError> for OpenOrCreateStorageError {
 
 fn init_storage(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
     log_debug!("initializing storage");
+    conn.execute("CREATE TABLE profile_version (version INTEGER)", &[])?;
+    conn.execute("INSERT INTO profile_version (version) VALUES (?)", &[&1])?;
     conn.execute("
         CREATE TABLE page_info (
             id INTEGER PRIMARY KEY,
@@ -65,6 +67,8 @@ fn init_storage(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
             position INTEGER NOT NULL
         )
     ", &[])?;
+    conn.execute("CREATE TABLE last_selected (id INTEGER)", &[])?;
+    conn.execute("INSERT INTO last_selected (id) VALUES (NULL)", &[])?;
     Ok(())
 }
 
@@ -379,6 +383,12 @@ impl Storage {
         pinned
     }
 
+    pub fn find_last_selected(&mut self) -> Option<page_store::Id> {
+        let id: Option<page_store::Id> = self.conn
+            .query_row("SELECT id FROM last_selected", &[], |row| row.get(0)).unwrap();
+        id
+    }
+
     pub fn find_highest_id(&mut self) -> page_store::Id {
 
         let page_tree_count: u32 = self.conn
@@ -442,6 +452,14 @@ impl<'conn> Modify<'conn> {
         self.transaction.execute(
             "UPDATE page_info SET is_pinned = ? WHERE id = ?",
             &[&is_pinned, &id],
+        )?;
+        Ok(())
+    }
+
+    fn update_selected(&self, id: page_store::Id) -> Result<(), UpdateError> {
+        self.transaction.execute(
+            "UPDATE last_selected SET id = ?",
+            &[&id],
         )?;
         Ok(())
     }
@@ -513,6 +531,8 @@ impl<'conn> Modify<'conn> {
                 self.update_tree(tree),
             Update::IsPinned { id, is_pinned } =>
                 self.update_is_pinned(id, is_pinned),
+            Update::Selected { id } =>
+                self.update_selected(id),
         }
     }
 
@@ -539,6 +559,7 @@ enum Update {
     IsPinned { id: page_store::Id, is_pinned: bool },
     Create { id: page_store::Id, uri: String, parent: Option<page_store::Id>, position: u32 },
     Remove { id: page_store::Id },
+    Selected { id: page_store::Id },
     Tree { tree: Tree },
 }
 
@@ -603,6 +624,11 @@ impl Updater {
     pub fn update_remove(&self, id: page_store::Id) {
         log_debug!("removal update for {}", id);
         self.sender.send(Update::Remove { id }).unwrap();
+    }
+
+    pub fn update_selected(&self, id: page_store::Id) {
+        log_debug!("selected update for {}", id);
+        self.sender.send(Update::Selected { id }).unwrap();
     }
 
     pub fn update_tree(&self, page_tree_store: &gtk::TreeStore) {

@@ -77,7 +77,9 @@ fn main() {
 fn setup(app: &gtk::Application, app_space: &rc::Rc<cell::RefCell<Option<app::Application>>>) {
 
     log_debug!("loading session");
-    let session_storage = session::Storage::open_or_create("_profile/config/session.db").unwrap();
+    let mut session_storage = session::Storage::open_or_create("_profile/config/session.db")
+        .unwrap();
+    let last_selected = session_storage.find_last_selected();
 
     log_debug!("assembling components");
     let page_store = page_store::Store::new_stateful(session_storage);
@@ -122,12 +124,18 @@ fn setup(app: &gtk::Application, app_space: &rc::Rc<cell::RefCell<Option<app::Ap
 
     if count == 0 {
         app.handle().page_store().unwrap().insert(page_store::InsertData {
-            title: Some("Test Crates".into()),
-            uri: "https://crates.io".into(),
+            title: Some("DuckDuckGo".into()),
+            uri: "https://duckduckgo.com/".into(),
             parent: None,
             position: page_store::InsertPosition::Start,
             reuse_id: None,
         }).unwrap();
+    }
+
+    if let Some(id) = last_selected {
+        app.handle().page_tree_view().unwrap().select(id);
+    } else {
+        app.handle().page_tree_view().unwrap().select_first();
     }
 
     *app_space.borrow_mut() = Some(app);

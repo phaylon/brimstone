@@ -10,6 +10,7 @@ use page_store;
 use mouse;
 use page_context_menu;
 use signal;
+use app_action;
 
 pub struct Map {
     widget: gtk::TreeView,
@@ -55,6 +56,13 @@ impl Map {
         let path = try_extract!(self.page_tree_store().get_path(iter));
         self.widget.expand_to_path(&path);
         self.widget.get_selection().select_iter(&iter);
+    }
+
+    pub fn select_first(&self) {
+        use gtk::{ TreeModelExt };
+
+        let iter = try_extract!(self.page_tree_store().iter_nth_child(None, 0));
+        self.select_iter(&iter);
     }
 
     pub fn collapse(&self, id: page_store::Id) {
@@ -147,6 +155,7 @@ pub fn setup(app: app::Handle) {
     page_tree_view.connect_drag_begin(with_cloned!(app, move |_view, _| {
         app.set_select_ignored(true);
     }));
+
     page_tree_view.connect_drag_end(with_cloned!(app, move |_view, _| {
         app.set_select_ignored(false);
         let page_tree_view = try_extract!(app.page_tree_view());
@@ -212,7 +221,7 @@ pub fn setup(app: app::Handle) {
         };
         
         if event.get_button() == mouse::BUTTON_RIGHT {
-            (||{
+            fn_scope! {
                 let store = try_extract!(app.page_tree_store());
                 let iter = try_extract!(view.get_model().unwrap().get_iter(&path));
                 let page_store = try_extract!(app.page_store());
@@ -232,17 +241,25 @@ pub fn setup(app: app::Handle) {
                     is_pinned,
                 });
                 map.menu().popup_easy(event.get_button(), event.get_time());
-            })();
+            };
+            gtk::prelude::Inhibit(true)
+        } else if event.get_button() == mouse::BUTTON_MIDDLE {
+            fn_scope! {
+                let store = try_extract!(app.page_tree_store());
+                let iter = try_extract!(view.get_model().unwrap().get_iter(&path));
+                let id = page_tree_store::get_id(&store, &iter);
+                app_action::try_close_page(&app, id);
+            };
             gtk::prelude::Inhibit(true)
         } else {
-            (||{
+            fn_scope! {
                 let store = try_extract!(app.page_tree_store());
                 let iter = try_extract!(view.get_model().unwrap().get_iter(&path));
                 let page_store = try_extract!(app.page_store());
                 let id = page_tree_store::get_id(&store, &iter);
                 let is_pinned = page_store.get_pinned(id);
                 view.set_reorderable(!is_pinned);
-            })();
+            };
             gtk::prelude::Inhibit(false)
         }
     }));

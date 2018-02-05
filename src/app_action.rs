@@ -23,6 +23,7 @@ pub const ACTION_RELOAD: &str = "app.reload";
 pub const ACTION_RELOAD_BP: &str = "app.reload-bp";
 pub const ACTION_STOP: &str = "app.stop-loading";
 pub const ACTION_NEW: &str = "app.new-page";
+pub const ACTION_NEW_CHILD: &str = "app.new-child-page";
 pub const ACTION_CLOSE: &str = "app.close-page";
 pub const ACTION_FOCUS: &str = "app.focus";
 pub const ACTION_RECENT_REOPEN: &str = "app.recent-reopen";
@@ -37,6 +38,7 @@ pub struct Map {
     pub reload_action: gio::SimpleAction,
     pub reload_bp_action: gio::SimpleAction,
     pub new_page_action: gio::SimpleAction,
+    pub new_child_page_action: gio::SimpleAction,
     pub close_page_action: gio::SimpleAction,
     pub focus_action: gio::SimpleAction,
     pub recent_reopen_action: gio::SimpleAction,
@@ -59,6 +61,7 @@ pub fn create() -> Map {
         reload_action: gio::SimpleAction::new("reload", None),
         reload_bp_action: gio::SimpleAction::new("reload-bp", None),
         new_page_action: gio::SimpleAction::new("new-page", None),
+        new_child_page_action: gio::SimpleAction::new("new-child-page", None),
         close_page_action: gio::SimpleAction::new("close-page", None),
         focus_action: gio::SimpleAction::new("focus", None),
         recent_reopen_action: gio::SimpleAction::new("recent-reopen", None),
@@ -79,8 +82,9 @@ fn create_menu_bar(recent_menu: &gio::Menu) -> gio::Menu {
         });
         menu::add(menu, "_Page", |menu| {
             menu::add_section(menu, |menu| {
-                menu::add_item(menu, "New Page", ACTION_NEW, Some(ACCEL_NEW));
-                menu::add_item(menu, "Close Page", ACTION_CLOSE, Some(ACCEL_CLOSE));
+                menu::add_item(menu, "_New Page", ACTION_NEW, Some(ACCEL_NEW));
+                menu::add_item(menu, "New Child Page", ACTION_NEW_CHILD, None);
+                menu::add_item(menu, "_Close Page", ACTION_CLOSE, Some(ACCEL_CLOSE));
             });
             menu::add_section(menu, |menu| {
                 menu::add_item(menu, "Go to _Previous Page", ACTION_GO_BACK, Some(ACCEL_GO_BACK));
@@ -145,8 +149,12 @@ pub fn setup(app: app::Handle) {
         let webview = try_extract!(app.active_webview());
         webview.stop_loading();
     });
+    menu::setup_action(&app, &app_actions.new_child_page_action, true, |app| {
+        create_new_page(&app, CreateMode::Child);
+    });
     menu::setup_action(&app, &app_actions.new_page_action, true, |app| {
-
+        create_new_page(&app, CreateMode::Sibling);
+        /*
         let page_store = try_extract!(app.page_store());
         let page_tree_view = try_extract!(app.page_tree_view());
         let id = try_extract!(app.get_active());
@@ -163,6 +171,7 @@ pub fn setup(app: app::Handle) {
 
         let navigation_bar = try_extract!(app.navigation_bar());
         navigation_bar.address_entry().grab_focus();
+        */
     });
     menu::setup_action(&app, &app_actions.focus_action, true, |app| {
         let navigation_bar = try_extract!(app.navigation_bar());
@@ -210,6 +219,44 @@ pub fn setup(app: app::Handle) {
         let load_state = try_extract!(page_store.get_load_state(id));
         adjust_for_load_state(&app, load_state);
     }));
+}
+
+pub enum CreateMode {
+    Sibling,
+    Child,
+}
+
+pub fn create_new_page(app: &app::Handle, mode: CreateMode) -> page_store::Id {
+    use gtk::{ WidgetExt };
+
+    let page_store = try_extract!(app.page_store());
+    let page_tree_view = try_extract!(app.page_tree_view());
+    let id = try_extract!(app.get_active());
+    let parent_id = page_store.get_parent(id);
+
+    let new_id = match mode {
+        CreateMode::Sibling => try_extract!(page_store.insert(page_store::InsertData {
+            title: None,
+            uri: "about:blank".into(),
+            parent: parent_id,
+            position: page_store::InsertPosition::After(id),
+            reuse_id: None,
+        })),
+        CreateMode::Child => try_extract!(page_store.insert(page_store::InsertData {
+            title: None,
+            uri: "about:blank".into(),
+            parent: Some(id),
+            position: page_store::InsertPosition::Start,
+            reuse_id: None,
+        })),
+    };
+
+    page_tree_view.select(new_id);
+
+    let navigation_bar = try_extract!(app.navigation_bar());
+    navigation_bar.address_entry().grab_focus();
+
+    new_id
 }
 
 fn reopen(app: &app::Handle, id: Option<page_store::Id>) {
