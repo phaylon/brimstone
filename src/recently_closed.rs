@@ -43,11 +43,17 @@ impl State {
 
     pub fn pull(&self, id: page_store::Id) -> Option<Page> {
         let index = self.find_index(id)?;
-        Some(self.items.borrow_mut().remove(index))
+        let page = Some(self.items.borrow_mut().remove(index));
+        self.change_notifier.emit(self, &());
+        page
     }
 
     pub fn pull_most_recent(&self) -> Option<Page> {
-        self.items.borrow_mut().pop()
+        let page = self.items.borrow_mut().pop();
+        if page.is_some() {
+            self.change_notifier.emit(self, &());
+        }
+        page
     }
 
     pub fn push(&self, page: Page) {
