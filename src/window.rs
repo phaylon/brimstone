@@ -28,13 +28,13 @@ pub fn set_title(app: &app::Handle, title: Option<&str>, uri: Option<&str>) {
     }
 }
 
-pub fn setup(app: app::Handle) {
+pub fn setup(app: &app::Handle) {
     use gtk::{ ContainerExt, WidgetExt };
 
-    let window = app.window().unwrap();
-    let page_tree_view = app.page_tree_view().unwrap();
+    let window = expect_some!(app.window(), "init window");
+    let page_tree_view = expect_some!(app.page_tree_view(), "init page tree view");
 
-    window.add(&app.main_paned().unwrap());
+    window.add(&expect_some!(app.main_paned(), "main paned during setup"));
 
     window.connect_delete_event(|window, _event| {
         match confirm_close(window, "the application") {
@@ -102,8 +102,8 @@ pub fn confirm_close(window: &gtk::ApplicationWindow, what: &str) -> CloseAnswer
     }
 }
 
-pub fn present(app: &app::Application) {
+pub fn present(app: &app::Handle) {
     use gtk::{ WidgetExt };
 
-    app.handle().window().unwrap().show_all();
+    expect_some!(app.window(), "window during presentation").show_all();
 }

@@ -20,7 +20,7 @@ pub fn escape<'a>(value: &'a str) -> borrow::Cow<'a, str> {
             if let Some(index) = rest.find(REPLACE) {
                 escaped.push_str(&rest[..index]);
                 rest = &rest[index..];
-                let found = rest.chars().next().unwrap();
+                let found = rest.chars().next().expect("found char is next char");
                 rest = &rest[found.len_utf8()..];
                 escaped.push_str(match found {
                     '&' => "&amp;",

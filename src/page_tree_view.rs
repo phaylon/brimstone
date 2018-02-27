@@ -145,18 +145,20 @@ pub fn create_tree_view() -> gtk::TreeView {
     view
 }
 
-pub fn setup(app: app::Handle) {
+pub fn setup(app: &app::Handle) {
     use gtk::{ TreeViewExt, TreeSelectionExt, WidgetExt };
 
-    let map = app.page_tree_view().unwrap();
+    let map = app.page_tree_view().expect("page tree view during setup");
     let page_tree_view = map.widget();
-    map.set_page_tree_store(&app.page_tree_store().unwrap());
+    map.set_page_tree_store(&app.page_tree_store().expect("page tree store during setup"));
 
     page_tree_view.connect_drag_begin(with_cloned!(app, move |_view, _| {
+        log_debug!("drag begin");
         app.set_select_ignored(true);
     }));
 
     page_tree_view.connect_drag_end(with_cloned!(app, move |_view, _| {
+        log_debug!("drag end");
         app.set_select_ignored(false);
         let page_tree_view = try_extract!(app.page_tree_view());
         let id = try_extract!(app.get_active());
@@ -204,7 +206,7 @@ pub fn setup(app: app::Handle) {
         for child_id in misplaced {
             page_store.move_to(child_id, None, last_position);
         }
-        page_store.session_update_tree();
+        page_store.update_session();
         if let Some(id) = app.get_active() {
             page_tree_view.select(id);
         }
@@ -223,7 +225,7 @@ pub fn setup(app: app::Handle) {
         if event.get_button() == mouse::BUTTON_RIGHT {
             fn_scope! {
                 let store = try_extract!(app.page_tree_store());
-                let iter = try_extract!(view.get_model().unwrap().get_iter(&path));
+                let iter = try_extract!(try_extract!(view.get_model()).get_iter(&path));
                 let page_store = try_extract!(app.page_store());
                 let id = page_tree_store::get_id(&store, &iter);
 
@@ -246,7 +248,7 @@ pub fn setup(app: app::Handle) {
         } else if event.get_button() == mouse::BUTTON_MIDDLE {
             fn_scope! {
                 let store = try_extract!(app.page_tree_store());
-                let iter = try_extract!(view.get_model().unwrap().get_iter(&path));
+                let iter = try_extract!(try_extract!(view.get_model()).get_iter(&path));
                 let id = page_tree_store::get_id(&store, &iter);
                 app_action::try_close_page(&app, id);
             };
@@ -254,7 +256,7 @@ pub fn setup(app: app::Handle) {
         } else {
             fn_scope! {
                 let store = try_extract!(app.page_tree_store());
-                let iter = try_extract!(view.get_model().unwrap().get_iter(&path));
+                let iter = try_extract!(try_extract!(view.get_model()).get_iter(&path));
                 let page_store = try_extract!(app.page_store());
                 let id = page_tree_store::get_id(&store, &iter);
                 let is_pinned = page_store.get_pinned(id);

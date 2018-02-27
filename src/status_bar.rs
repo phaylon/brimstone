@@ -1,12 +1,11 @@
 
-use std::rc;
 use std::cell;
 
 use gtk;
 
 use app;
 
-pub struct Bar {
+pub struct Map {
     pub size_group: gtk::SizeGroup,
     pub page_tree_status: gtk::Box,
     pub webview_status: gtk::Box,
@@ -15,45 +14,10 @@ pub struct Bar {
     pub hover_uri: cell::RefCell<Option<String>>,
 }
 
-pub struct Handle {
-    bar: rc::Rc<Bar>,
-}
+impl Map {
 
-impl Handle {
-
-    pub fn new(bar: rc::Rc<Bar>) -> Handle {
-        Handle { bar }
-    }
-
-    pub fn page_tree_status(&self) -> gtk::Box { self.bar.page_tree_status.clone() }
-
-    pub fn webview_status(&self) -> gtk::Box { self.bar.webview_status.clone() }
-
-    pub fn size_group(&self) -> gtk::SizeGroup { self.bar.size_group.clone() }
-    
-    pub fn page_counter(&self) -> gtk::Label { self.bar.page_counter.clone() }
-    
-    pub fn webview_info(&self) -> gtk::Label { self.bar.webview_info.clone() }
-
-    pub fn set_hover_uri(&self, uri: Option<String>) {
-        *self.bar.hover_uri.borrow_mut() = uri;
-        self.update();
-    }
-
-    fn update(&self) {
-        use gtk::{ LabelExt };
-
-        match *self.bar.hover_uri.borrow() {
-            Some(ref uri) => self.bar.webview_info.set_text(&uri),
-            None => self.bar.webview_info.set_text(""),
-        }
-    }
-}
-
-impl Bar {
-
-    pub fn new() -> Bar {
-        Bar {
+    pub fn new() -> Map {
+        Map {
             size_group: gtk::SizeGroup::new(gtk::SizeGroupMode::Vertical),
             page_tree_status: gtk::Box::new(gtk::Orientation::Horizontal, 5),
             webview_status: gtk::Box::new(gtk::Orientation::Horizontal, 5),
@@ -62,9 +26,33 @@ impl Bar {
             hover_uri: cell::RefCell::new(None),
         }
     }
+
+    pub fn page_tree_status(&self) -> gtk::Box { self.page_tree_status.clone() }
+
+    pub fn webview_status(&self) -> gtk::Box { self.webview_status.clone() }
+
+    pub fn size_group(&self) -> gtk::SizeGroup { self.size_group.clone() }
+    
+    pub fn page_counter(&self) -> gtk::Label { self.page_counter.clone() }
+    
+    pub fn webview_info(&self) -> gtk::Label { self.webview_info.clone() }
+
+    pub fn set_hover_uri(&self, uri: Option<String>) {
+        *self.hover_uri.borrow_mut() = uri;
+        self.update();
+    }
+
+    fn update(&self) {
+        use gtk::{ LabelExt };
+
+        match *self.hover_uri.borrow() {
+            Some(ref uri) => self.webview_info.set_text(&uri),
+            None => self.webview_info.set_text(""),
+        }
+    }
 }
 
-pub fn setup(app: app::Handle) {
+pub fn setup(app: &app::Handle) {
     use gtk::{ SizeGroupExt, BoxExt, LabelExt, WidgetExt };
     use pango;
 

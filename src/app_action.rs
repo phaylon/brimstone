@@ -4,6 +4,8 @@ use gio;
 use app;
 use page_store;
 use window;
+use recently_closed;
+use stored;
 
 const ACCEL_RELOAD: &str = "<ctrl>r";
 const ACCEL_RELOAD_BP: &str = "<ctrl><shift>r";
@@ -28,6 +30,9 @@ pub const ACTION_CLOSE: &str = "app.close-page";
 pub const ACTION_FOCUS: &str = "app.focus";
 pub const ACTION_RECENT_REOPEN: &str = "app.recent-reopen";
 pub const ACTION_REOPEN: &str = "app.reopen";
+pub const ACTION_HISTORY: &str = "app.show-history";
+pub const ACTION_BOOKMARKS: &str = "app.show-bookmarks";
+pub const ACTION_SHORTCUTS: &str = "app.show-shortcuts";
 
 pub struct Map {
     pub menu_bar: gio::Menu,
@@ -44,10 +49,13 @@ pub struct Map {
     pub recent_reopen_action: gio::SimpleAction,
     pub recent_menu: gio::Menu,
     pub reopen_action: gio::SimpleAction,
+    pub history_action: gio::SimpleAction,
+    pub bookmarks_action: gio::SimpleAction,
+    pub shortcuts_action: gio::SimpleAction,
 }
 
 pub fn create() -> Map {
-    use gtk::{ StaticVariantType };
+    use gtk::{ StaticVariantType, ToVariant };
 
     let recent_menu = gio::Menu::new();
     let menu_bar = create_menu_bar(&recent_menu);
@@ -68,6 +76,21 @@ pub fn create() -> Map {
         reopen_action: gio::SimpleAction::new(
             "reopen",
             Some(&*page_store::Id::static_variant_type()),
+        ),
+        history_action: gio::SimpleAction::new_stateful(
+            "show-history",
+            None,
+            &false.to_variant(),
+        ),
+        bookmarks_action: gio::SimpleAction::new_stateful(
+            "show-bookmarks",
+            None,
+            &false.to_variant(),
+        ),
+        shortcuts_action: gio::SimpleAction::new_stateful(
+            "show-shortcuts",
+            None,
+            &false.to_variant(),
         ),
     }
 }
@@ -94,6 +117,13 @@ fn create_menu_bar(recent_menu: &gio::Menu) -> gio::Menu {
                 menu::add_item(menu, "_Stop Loading", ACTION_STOP, Some(ACCEL_STOP));
             });
         });
+        menu::add(menu, "_View", |menu| {
+            menu::add_section(menu, |menu| {
+                menu::add_item(menu, "_History", ACTION_HISTORY, None);
+                menu::add_item(menu, "_Bookmarks", ACTION_BOOKMARKS, None);
+                menu::add_item(menu, "_Shortcuts", ACTION_SHORTCUTS, None);
+            });
+        });
         menu::add(menu, "_History", |menu| {
             menu::add_section(menu, |menu| {
                 menu::add(menu, "_Recently Closed Pages", |menu| {
@@ -109,7 +139,37 @@ fn create_menu_bar(recent_menu: &gio::Menu) -> gio::Menu {
     })
 }
 
-pub fn setup(app: app::Handle) {
+fn change_stored_view(
+    app: &app::Handle,
+    action: &gio::SimpleAction,
+    section: stored::Section,
+) {
+    use gio::{ ActionExt, SimpleActionExt };
+    use gtk::{ ToVariant };
+
+    let app_actions = try_extract!(app.app_actions());
+    let stored = try_extract!(app.stored());
+
+    let is_active: bool =
+        if let Some(state) = action.get_state() {
+            state.get().expect("boolean action state")
+        } else {
+            false
+        };
+
+    if is_active {
+        stored.hide();
+        action.set_state(&false.to_variant());
+    } else {
+        stored.show_section(section);
+        app_actions.history_action.set_state(&false.to_variant());
+        app_actions.bookmarks_action.set_state(&false.to_variant());
+        app_actions.shortcuts_action.set_state(&false.to_variant());
+        action.set_state(&true.to_variant());
+    }
+}
+
+pub fn setup(app: &app::Handle) {
     use gtk::{ GtkApplicationExt, WidgetExt, GtkWindowExt };
     use webkit2gtk::{ WebViewExt };
     use menu;
@@ -121,70 +181,77 @@ pub fn setup(app: app::Handle) {
 
     application.set_menubar(&app_actions.menu_bar);
 
-    menu::setup_action(&app, &app_actions.quit_action, true, |app| {
+    menu::setup_action(&app, &app_actions.history_action, true, |app, action| {
+        log_action!(ACTION_HISTORY);
+        change_stored_view(&app, action, stored::Section::History);
+    });
+    menu::setup_action(&app, &app_actions.bookmarks_action, true, |app, action| {
+        log_action!(ACTION_BOOKMARKS);
+        change_stored_view(&app, action, stored::Section::Bookmarks);
+    });
+    menu::setup_action(&app, &app_actions.shortcuts_action, true, |app, action| {
+        log_action!(ACTION_SHORTCUTS);
+        change_stored_view(&app, action, stored::Section::Shortcuts);
+    });
+
+    menu::setup_action(&app, &app_actions.quit_action, true, |app, _| {
+        log_action!(ACTION_QUIT);
         let window = try_extract!(app.window());
         window.close();
     });
-    menu::setup_action(&app, &app_actions.go_back_action, false, |app| {
+    menu::setup_action(&app, &app_actions.go_back_action, false, |app, _| {
+        log_action!(ACTION_GO_BACK);
         let webview = try_extract!(app.active_webview());
         if webview.can_go_back() {
             webview.go_back();
         }
     });
-    menu::setup_action(&app, &app_actions.go_forward_action, false, |app| {
+    menu::setup_action(&app, &app_actions.go_forward_action, false, |app, _| {
+        log_action!(ACTION_GO_FORWARD);
         let webview = try_extract!(app.active_webview());
         if webview.can_go_forward() {
             webview.go_forward();
         }
     });
-    menu::setup_action(&app, &app_actions.reload_action, false, |app| {
+    menu::setup_action(&app, &app_actions.reload_action, false, |app, _| {
+        log_action!(ACTION_RELOAD);
         let webview = try_extract!(app.active_webview());
         webview.reload();
     });
-    menu::setup_action(&app, &app_actions.reload_bp_action, false, |app| {
+    menu::setup_action(&app, &app_actions.reload_bp_action, false, |app, _| {
+        log_action!(ACTION_RELOAD_BP);
         let webview = try_extract!(app.active_webview());
         webview.reload_bypass_cache();
     });
-    menu::setup_action(&app, &app_actions.stop_loading_action, false, |app| {
+    menu::setup_action(&app, &app_actions.stop_loading_action, false, |app, _| {
+        log_action!(ACTION_STOP);
         let webview = try_extract!(app.active_webview());
         webview.stop_loading();
     });
-    menu::setup_action(&app, &app_actions.new_child_page_action, true, |app| {
+    menu::setup_action(&app, &app_actions.new_child_page_action, true, |app, _| {
+        log_action!(ACTION_NEW_CHILD);
         create_new_page(&app, CreateMode::Child);
     });
-    menu::setup_action(&app, &app_actions.new_page_action, true, |app| {
+    menu::setup_action(&app, &app_actions.new_page_action, true, |app, _| {
+        log_action!(ACTION_NEW);
         create_new_page(&app, CreateMode::Sibling);
-        /*
-        let page_store = try_extract!(app.page_store());
-        let page_tree_view = try_extract!(app.page_tree_view());
-        let id = try_extract!(app.get_active());
-        let parent_id = page_store.get_parent(id);
-        let new_id = try_extract!(page_store.insert(page_store::InsertData {
-            title: None,
-            uri: "about:blank".into(),
-            parent: parent_id,
-            position: page_store::InsertPosition::After(id),
-            reuse_id: None,
-        }));
-
-        page_tree_view.select(new_id);
-
-        let navigation_bar = try_extract!(app.navigation_bar());
-        navigation_bar.address_entry().grab_focus();
-        */
     });
-    menu::setup_action(&app, &app_actions.focus_action, true, |app| {
+    menu::setup_action(&app, &app_actions.focus_action, true, |app, _| {
+        log_action!(ACTION_FOCUS);
         let navigation_bar = try_extract!(app.navigation_bar());
         navigation_bar.address_entry().grab_focus();
     });
     application.add_accelerator(ACCEL_FOCUS, ACTION_FOCUS, None);
-    menu::setup_action(&app, &app_actions.close_page_action, true, |app| {
+    menu::setup_action(&app, &app_actions.close_page_action, true, |app, _| {
+        log_action!(ACTION_CLOSE);
         try_close_page(&app, try_extract!(app.get_active()));
     });
     menu::setup_param_action(&app, &app_actions.reopen_action, true, |app, id: page_store::Id| {
+        log_action!(ACTION_REOPEN);
         reopen(&app, Some(id));
     });
-    menu::setup_action(&app, &app_actions.recent_reopen_action, false, |app| {
+    menu::setup_action(&app, &app_actions.recent_reopen_action, false, |app, _| {
+        log_action!(ACTION_RECENT_REOPEN);
         reopen(&app, None);
     });
 
@@ -221,6 +288,7 @@ pub fn setup(app: app::Handle) {
     }));
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum CreateMode {
     Sibling,
     Child,
@@ -229,27 +297,23 @@ pub enum CreateMode {
 pub fn create_new_page(app: &app::Handle, mode: CreateMode) -> page_store::Id {
     use gtk::{ WidgetExt };
 
+    log_debug!("creating new page ({:?})", mode);
+
     let page_store = try_extract!(app.page_store());
     let page_tree_view = try_extract!(app.page_tree_view());
     let id = try_extract!(app.get_active());
     let parent_id = page_store.get_parent(id);
 
-    let new_id = match mode {
-        CreateMode::Sibling => try_extract!(page_store.insert(page_store::InsertData {
-            title: None,
-            uri: "about:blank".into(),
-            parent: parent_id,
-            position: page_store::InsertPosition::After(id),
-            reuse_id: None,
-        })),
-        CreateMode::Child => try_extract!(page_store.insert(page_store::InsertData {
-            title: None,
-            uri: "about:blank".into(),
-            parent: Some(id),
-            position: page_store::InsertPosition::Start,
-            reuse_id: None,
-        })),
-    };
+    let new_id = page_store.insert({
+        let data = page_store::InsertData::new("about:blank".into());
+        match mode {
+            CreateMode::Sibling => data
+                .with_parent(parent_id)
+                .with_position(page_store::InsertPosition::After(id)),
+            CreateMode::Child => data
+                .with_parent(Some(id)),
+        }
+    }).expect("new created page");
 
     page_tree_view.select(new_id);
 
@@ -260,6 +324,7 @@ pub fn create_new_page(app: &app::Handle, mode: CreateMode) -> page_store::Id {
 }
 
 fn reopen(app: &app::Handle, id: Option<page_store::Id>) {
+    log_debug!("reopen from recent: {:?}", id);
 
     let page_store = try_extract!(app.page_store());
     let page_tree_view = try_extract!(app.page_tree_view());
@@ -281,13 +346,15 @@ fn reopen(app: &app::Handle, id: Option<page_store::Id>) {
         }
     }
 
-    let id = page_store.insert(page_store::InsertData {
-        title: page.title.clone(),
-        uri: page.uri.clone(),
-        parent: parent.0,
-        position: parent.1,
-        reuse_id: Some(page.id),
-    }).expect("fresh id for reopened page");
+    let recently_closed::Page { title, uri, id, .. } = page;
+
+    page_store.insert(
+        page_store::InsertData::new(uri)
+            .with_title(title)
+            .with_parent(parent.0)
+            .with_position(parent.1)
+            .with_reused_id(id)
+    ).expect("reopened page");
 
     page_tree_view.select(id);
 }
@@ -341,18 +408,18 @@ fn find_next_selection(app: &app::Handle, parent: Option<page_store::Id>, positi
     if let Some(id) = page_store.find_previous(parent, position) { id }
     else if let Some(id) = page_store.find_next_incl(parent, position + 1) { id }
     else {
-        page_store.insert(page_store::InsertData {
-            uri: "about:blank".into(),
-            title: Some("about:blank".into()),
-            parent: None,
-            position: page_store::InsertPosition::End,
-            reuse_id: None,
-        }).expect("created fallback page")
+        page_store.insert(
+            page_store::InsertData::new("about:blank".into())
+                .with_title(Some("about:blank".into()))
+                .with_position(page_store::InsertPosition::End)
+        ).expect("created fallback page")
     }
 }
 
 pub fn try_close_page(app: &app::Handle, id: page_store::Id) {
     use gtk::{ TreeSelectionExt, TreeViewExt };
+
+    log_debug!("closing page {}", id);
 
     let page_store = try_extract!(app.page_store());
     let page_tree_view = try_extract!(app.page_tree_view());

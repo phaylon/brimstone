@@ -47,7 +47,8 @@ pub fn recalc(tree_store: &gtk::TreeStore, iter: &gtk::TreeIter) {
     
     let mut sum = 0;
     for index in 0..tree_store.iter_n_children(iter) {
-        let child_iter = tree_store.iter_nth_child(iter, index).unwrap();
+        let child_iter = tree_store.iter_nth_child(iter, index)
+            .expect("child iter for valid index is available");
         sum += 1 + get_child_count(tree_store, &child_iter);
     }
 

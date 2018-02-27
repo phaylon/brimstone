@@ -95,7 +95,7 @@ pub fn create() -> Map {
     }
 }
 
-pub fn setup(app: app::Handle) {
+pub fn setup(app: &app::Handle) {
     use gtk::{ MenuExt };
     use gio::{ ActionExt };
 
@@ -103,10 +103,12 @@ pub fn setup(app: app::Handle) {
     map.menu().set_property_attach_widget(Some(try_extract!(app.page_tree_view()).widget()));
 
     menu::setup_win_action(&app, &map.close_action, true, |app, _| {
+        log_action!(ACTION_CLOSE);
         app_action::try_close_page(&app, try_extract!(app.get_page_tree_target()));
     });
 
     menu::setup_win_action(&app, &map.pin_action, true, |app, action| {
+        log_action!(ACTION_PIN);
         let page_store = try_extract!(app.page_store());
         let id = try_extract!(app.get_page_tree_target());
         let is_active: bool =
@@ -120,22 +122,24 @@ pub fn setup(app: app::Handle) {
     });
 
     menu::setup_win_action(&app, &map.duplicate_action, true, |app, _| {
+        log_action!(ACTION_DUPLICATE);
         let page_store = try_extract!(app.page_store());
         let id = try_extract!(app.get_page_tree_target());
         let parent = page_store.get_parent(id);
         let uri = page_store.get_uri(id);
         let title = page_store.get_title(id);
-        page_store.insert(page_store::InsertData {
-            uri: uri.unwrap_or_else(|| text::RcString::new()),
-            title,
-            parent,
-            position: page_store::InsertPosition::After(id),
-            reuse_id: None,
-        });
+        page_store.insert(
+            page_store::InsertData::new(uri.unwrap_or_else(|| text::RcString::new()))
+                .with_title(title)
+                .with_parent(parent)
+                .with_position(page_store::InsertPosition::After(id))
+        ).expect("duplicate page creation");
     });
 
     menu::setup_win_action(&app, &map.reload_action, true, |app, _| {
         use webkit2gtk::{ WebViewExt };
+
+        log_action!(ACTION_RELOAD);
 
         let id = try_extract!(app.get_page_tree_target());
         let page_store = try_extract!(app.page_store());
@@ -146,6 +150,8 @@ pub fn setup(app: app::Handle) {
     menu::setup_win_action(&app, &map.reload_bp_action, true, |app, _| {
         use webkit2gtk::{ WebViewExt };
 
+        log_action!(ACTION_RELOAD_BP);
+
         let id = try_extract!(app.get_page_tree_target());
         let page_store = try_extract!(app.page_store());
         let webview = try_extract!(page_store.try_get_view(id));
@@ -153,21 +159,21 @@ pub fn setup(app: app::Handle) {
     });
 
     menu::setup_win_action(&app, &map.expand_action, true, |app, _| {
-
+        log_action!(ACTION_EXPAND);
         let id = try_extract!(app.get_page_tree_target());
         let page_tree_view = try_extract!(app.page_tree_view());
         page_tree_view.expand(id, false);
     });
 
     menu::setup_win_action(&app, &map.expand_all_action, true, |app, _| {
-
+        log_action!(ACTION_EXPAND_ALL);
         let id = try_extract!(app.get_page_tree_target());
         let page_tree_view = try_extract!(app.page_tree_view());
         page_tree_view.expand(id, true);
     });
 
     menu::setup_win_action(&app, &map.collapse_action, true, |app, _| {
-
+        log_action!(ACTION_COLLAPSE);
         let id = try_extract!(app.get_page_tree_target());
         let page_tree_view = try_extract!(app.page_tree_view());
         page_tree_view.collapse(id);

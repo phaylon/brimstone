@@ -68,7 +68,7 @@ pub fn setup_param_action<F, T>(
 
     let app = app.clone();
     action.connect_activate(move |_, param|
-        activate(&app, param.as_ref().and_then(|var| var.get()).unwrap())
+        activate(&app, param.as_ref().and_then(|var| var.get()).expect("param value available"))
     );
     action.set_enabled(enabled);
 
@@ -80,13 +80,13 @@ pub fn setup_action<F>(
     action: &gio::SimpleAction,
     enabled: bool,
     activate: F,
-) where F: Fn(&app::Handle) + 'static {
+) where F: Fn(&app::Handle, &gio::SimpleAction) + 'static {
     use gio::{ SimpleActionExt, ActionMapExt };
 
     let application = try_extract!(app.application());
 
     let app = app.clone();
-    action.connect_activate(move |_, _| activate(&app));
+    action.connect_activate(move |action, _| activate(&app, action));
     action.set_enabled(enabled);
 
     application.add_action(action);

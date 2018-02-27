@@ -21,14 +21,17 @@ impl<S, T> Notifier<S, T> where T: ?Sized {
     }
 
     pub fn emit(&self, object: &S, data: &T) {
+        use dynamic::{ BorrowIn };
+
         if self.emitting.get() {
             panic!("notifier signal is already being emitted");
         }
         self.emitting.set(true);
-        let handlers = self.handlers.borrow();
-        for handler in handlers.iter() {
-            handler(object, data);
-        }
+        self.handlers.borrow_in(|handlers| {
+            for handler in handlers.iter() {
+                handler(object, data);
+            }
+        });
         self.emitting.set(false);
     }
 }

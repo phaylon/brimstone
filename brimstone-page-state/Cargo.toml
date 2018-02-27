@@ -1,0 +1,9 @@
+[package]
+name = "brimstone-page-state"
+version = "0.1.0"
+authors = ["Robert Sedlacek <rs@474.at>"]
+
+[dependencies]
+brimstone-storage = { path = "../brimstone-storage" }
+brimstone-domain-settings = { path = "../brimstone-domain-settings" }
+

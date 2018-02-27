@@ -1,0 +1,9 @@
+[package]
+name = "brimstone-domain-settings"
+version = "0.1.0"
+authors = ["Robert Sedlacek <rs@474.at>"]
+
+[dependencies]
+brimstone-storage = { path = "../brimstone-storage" }
+tendril = "*"
+url = "*"

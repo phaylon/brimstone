@@ -16,6 +16,7 @@ use session;
 use recently_closed;
 use text;
 use signal;
+use script_dialog;
 
 pub type Id = u32;
 
@@ -28,6 +29,7 @@ pub struct LoadState {
     pub can_go_forward: bool,
     pub is_loading: bool,
     pub tls_state: TlsState,
+    pub event: Option<webkit2gtk::LoadEvent>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -42,18 +44,19 @@ pub struct Store {
     entries: rc::Rc<cell::RefCell<collections::HashMap<Id, Entry>>>,
     pinned: cell::RefCell<Vec<Id>>,
     tree_store: gtk::TreeStore,
-    session: Option<session::Updater>,
+    session: Option<session::Session>,
     recently_closed: recently_closed::State,
     count_change_notifier: signal::Notifier<Store, usize>,
     load_state_change_notifier: signal::Notifier<Store, (Id, LoadState)>,
 }
 
-pub fn setup(app: app::Handle) {
+pub fn setup(app: &app::Handle) {
 
     let page_tree_view = try_extract!(app.page_tree_view());
     page_tree_view.on_selection_change(with_cloned!(app, move |_map, &id| {
         let page_store = try_extract!(app.page_store());
         page_store.set_read(id);
+        page_store.session.as_ref().map(|session| session.update_selected(id));
     }));
 }
 
@@ -62,36 +65,31 @@ impl Store {
     fn_connect_notifier!(count_change_notifier, on_count_change, usize);
     fn_connect_notifier!(load_state_change_notifier, on_load_state_change, (Id, LoadState));
 
-    pub fn new_stateful(mut session: session::Storage) -> Store {
-        log_debug!("constructing store from session");
+    pub fn new_stateful(session: session::Session) -> (Store, Option<Id>) {
+        log_debug!("new stateful page store");
 
         fn populate(
             parent: Option<&gtk::TreeIter>,
-            children: &session::Nodes,
+            children: &[session::Node],
             entries: &mut collections::HashMap<Id, Entry>,
             tree_store: &gtk::TreeStore,
         ) {
             for child in children {
-                let info = child.borrow().info.clone().unwrap_or_else(|| session::NodeInfo {
-                    title: Some(String::new()),
-                    uri: String::new(),
-                    is_pinned: false,
-                });
-                let session::NodeInfo { title, uri, is_pinned } = info;
-                let id = child.borrow().id;
+                let id = child.id();
                 entries.insert(id, Entry {
                     id,
-                    uri: uri.clone().into(),
-                    title: title.clone().map(|v| v.into()),
+                    uri: child.uri().clone(),
+                    title: child.title().cloned(),
                     view: None,
                     favicon: None,
                     is_noclose: false,
-                    is_pinned: is_pinned,
+                    is_pinned: child.is_pinned(),
                     load_state: LoadState {
                         can_go_back: false,
                         can_go_forward: false,
                         is_loading: false,
                         tls_state: TlsState::Insecure,
+                        event: None,
                     },
                 });
                 let iter = page_tree_store::insert(
@@ -100,45 +98,56 @@ impl Store {
                     None,
                     page_tree_store::Entry {
                         id,
-                        title: text::escape(&title.unwrap_or_else(|| uri)).into(),
+                        title: text::escape(child.title().unwrap_or_else(|| child.uri())).into(),
                         child_info: "".into(),
                         has_children: false,
                         child_count: 0,
                         style: pango::Style::Italic,
                         weight: TITLE_WEIGHT_DEFAULT,
-                        is_pinned: is_pinned,
+                        is_pinned: child.is_pinned(),
                     },
                 );
-                populate(Some(&iter), &child.borrow().children, entries, tree_store);
+                populate(Some(&iter), &child.children(), entries, tree_store);
                 page_tree_store::recalc(tree_store, &iter);
             }
         }
 
-        let last_id = session.find_highest_id().checked_add(1).unwrap();
-        let pinned = session.find_pinned_ids();
-        let tree = session.load_tree().unwrap();
+        let mut tree = expect_ok!(session.load_tree(), "loaded session tree");
+        tree.compact();
+        let last_id = tree.find_highest_id().unwrap_or(0).checked_add(1)
+            .expect("last id in available id space");
+        let pinned = tree.find_pinned();
+        let last_selected = tree.find_selected();
+        if let Some(last_selected) = last_selected {
+            expect_ok!(
+                session.update_selected(last_selected),
+                "update selection in session",
+                last_selected,
+            );
+        }
 
         let mut entries = collections::HashMap::new();
         let tree_store = page_tree_store::create();
 
-        log_debug!("populating store from session");
-        populate(None, &tree, &mut entries, &tree_store);
-    
-        let session_updater = session::Updater::new(session);
+        populate(None, tree.children(), &mut entries, &tree_store);
 
-        Store {
+        let store = Store {
             last_id: cell::Cell::new(last_id),
             entries: rc::Rc::new(cell::RefCell::new(entries)),
             tree_store,
             pinned: cell::RefCell::new(pinned),
-            session: Some(session_updater),
+            session: Some(session),
             recently_closed: recently_closed::State::new(),
             count_change_notifier: signal::Notifier::new(),
             load_state_change_notifier: signal::Notifier::new(),
-        }
+        };
+        store.update_session();
+
+        (store, last_selected)
     }
 
     pub fn new_stateless() -> Store {
+        log_debug!("new stateless page store");
         Store {
             last_id: cell::Cell::new(0),
             entries: rc::Rc::new(cell::RefCell::new(collections::HashMap::new())),
@@ -153,9 +162,16 @@ impl Store {
 
     pub fn recently_closed_state(&self) -> &recently_closed::State { &self.recently_closed }
 
-    pub fn session_update_tree(&self) {
-        let tree_store = &self.tree_store;
-        self.session_update(|session| session.update_tree(tree_store));
+    pub fn update_session(&self) {
+        self.session
+            .as_ref()
+            .map(|session| session.update_all(self).expect("session update"));
+    }
+
+    pub fn update_session_node(&self, id: Id) {
+        self.session
+            .as_ref()
+            .map(|session| session.update_node(self, id).expect("node session update"));
     }
 
     pub fn pinned_count(&self) -> usize { self.pinned.borrow().len() }
@@ -170,12 +186,6 @@ impl Store {
     pub fn set_read(&self, id: Id) {
         let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
         page_tree_store::set_weight(&self.tree_store, &iter, TITLE_WEIGHT_DEFAULT);
-    }
-
-    fn session_update<F>(&self, body: F) where F: FnOnce(&session::Updater) {
-        if let Some(ref updater) = self.session {
-            body(updater);
-        }
     }
 
     pub fn set_pinned(&self, id: Id, is_pinned: bool) {
@@ -194,10 +204,7 @@ impl Store {
             self.move_to(id, None, count as i32);
             self.pinned.borrow_mut().retain(|pinned_id| *pinned_id != id);
         }
-        self.session_update(|session| {
-            session.update_tree(&self.tree_store);
-            session.update_is_pinned(id, is_pinned);
-        });
+        self.update_session();
         if let Some(old_parent) = old_parent {
             self.recalc(&old_parent);
         }
@@ -262,8 +269,11 @@ impl Store {
     pub fn nth_child(&self, parent: Option<Id>, index: u32) -> Option<Id> {
         use gtk::{ TreeModelExt };
 
-        let parent_iter = parent
-            .map(|id| page_tree_store::find_iter_by_id(&self.tree_store, id).unwrap());
+        let parent_iter = parent.map(|id| expect_some!(
+            page_tree_store::find_iter_by_id(&self.tree_store, id),
+            "parent is is valid",
+            parent_id: id,
+        ));
         let child_iter = match self.tree_store.iter_nth_child(parent_iter.as_ref(), index as i32) {
             Some(child) => child,
             None => return None,
@@ -338,6 +348,9 @@ impl Store {
 
     pub fn close(&self, id: Id, close_children: bool) {
         use gtk::{ Cast, TreeStoreExt, ContainerExt, WidgetExt, TreeModelExt };
+        use dynamic::{ BorrowMutIn };
+
+        log_debug!("closing page {} (close children: {:?})", id, close_children);
 
         fn deep_close(
             page_store: &Store,
@@ -349,10 +362,9 @@ impl Store {
                 deep_close(page_store, store, &child_iter);
             }
 
-            let mut entries = page_store.entries.borrow_mut();
-            //let index = entries.iter().position(|entry| entry.id == id).unwrap();
-            //let entry = entries.remove(index);
-            let entry = entries.remove(&id).unwrap();
+            let entry = page_store.entries.borrow_mut_in(|mut entries|
+                expect_some!(entries.remove(&id), "page removed", id)
+            );
             page_store.recently_closed.push(recently_closed::Page {
                 id,
                 title: entry.title,
@@ -360,7 +372,6 @@ impl Store {
                 position: page_store.get_position_profile(id),
             });
             store.remove(iter);
-            page_store.session_update(|session| session.update_remove(id));
 
             let webview = match entry.view {
                 Some(webview) => webview,
@@ -399,7 +410,7 @@ impl Store {
         let parent_iter = self.tree_store.iter_parent(&iter);
 
         deep_close(self, &self.tree_store, &iter);
-        self.session_update(|session| session.update_tree(&self.tree_store));
+        self.update_session();
         self.count_change_notifier.emit(self, &self.get_count());
 
         if let Some(parent_iter) = parent_iter {
@@ -436,8 +447,11 @@ impl Store {
     pub fn move_to(&self, id: Id, parent: Option<Id>, position: i32) {
 
         let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
-        let parent_iter = parent
-            .map(|id| page_tree_store::find_iter_by_id(&self.tree_store, id).unwrap());
+        let parent_iter = parent.map(|id| expect_some!(
+            page_tree_store::find_iter_by_id(&self.tree_store, id),
+            "parent id is valid",
+            parent_id: id,
+        ));
 
         self.move_iter_to(iter, parent_iter.as_ref(), position);
     }
@@ -476,17 +490,15 @@ impl Store {
     }
 
     pub fn set_uri(&self, id: Id, value: text::RcString) {
-        self.session_update(|session| session.update_uri(id, &value));
         self.map_entry_mut(id, |entry| entry.uri = value);
         self.update_tree_title(id);
+        self.update_session_node(id);
     }
 
     pub fn set_title(&self, id: Id, value: Option<text::RcString>) {
-        self.session_update(|session|
-            session.update_title(id, &value.clone().unwrap_or_else(|| text::RcString::new()))
-        );
         self.map_entry_mut(id, |entry| entry.title = value);
         self.update_tree_title(id);
+        self.update_session_node(id);
     }
 
     pub fn get_load_state(&self, id: Id) -> Option<LoadState> {
@@ -529,6 +541,15 @@ impl Store {
         None
     }
 
+    pub fn get_data(&self, id: Id) -> Option<Data> {
+        self.map_entry(id, |entry| Data {
+            id,
+            title: entry.title.clone(),
+            uri: entry.uri.clone(),
+            is_pinned: entry.is_pinned,
+        })
+    }
+
     pub fn try_get_view(&self, id: Id) -> Option<webkit2gtk::WebView> {
         self.map_entry(id, |entry| entry.view.clone()).and_then(|view| view)
     }
@@ -543,12 +564,23 @@ impl Store {
             None => return None,
         };
 
-        let uri = self.map_entry(id, |entry| entry.uri.clone()).unwrap();
+        log_debug!("creating webview for page {}", id);
+
+        let uri = expect_some!(
+            self.map_entry(id, |entry| entry.uri.clone()),
+            "uri for view",
+            id,
+        );
         let new_view = webview::create(id, app);
+        script_dialog::connect(app, &new_view);
         new_view.load_uri(&uri);
         let ret_view = new_view.clone();
         self.map_entry_mut(id, move |entry| entry.view = Some(new_view));
-        let iter = page_tree_store::find_iter_by_id(&self.tree_store, id).unwrap();
+        let iter = expect_some!(
+            page_tree_store::find_iter_by_id(&self.tree_store, id),
+            "view id is valid",
+            id,
+        );
         page_tree_store::set_style(&self.tree_store, &iter, pango::Style::Normal);
         Some(ret_view)
     }
@@ -568,6 +600,8 @@ impl Store {
         if self.exists(id) {
             panic!("page id {} is already in store", id);
         }
+
+        log_debug!("insert page {}: {:?}", id, uri.as_str());
         let parent_iter = match data.parent {
             Some(parent_id) => Some(try_extract!(page_tree_store::find_iter_by_id(
                 &self.tree_store,
@@ -588,6 +622,7 @@ impl Store {
                 can_go_forward: false,
                 is_loading: false,
                 tls_state: TlsState::Insecure,
+                event: None,
             },
         });
         let position = {
@@ -638,8 +673,7 @@ impl Store {
                 is_pinned: false,
             },
         );
-        self.session_update(|session| session.update_create(id, &uri, parent, position));
-        self.session_update(|session| session.update_title(id, &title));
+        self.update_session();
         self.count_change_notifier.emit(self, &self.get_count());
         if let Some(ref iter) = parent_iter {
             self.recalc(iter);
@@ -656,6 +690,7 @@ impl Store {
     }
 }
 
+#[derive(Debug)]
 pub enum InsertPosition {
     Start,
     At(u32),
@@ -664,6 +699,7 @@ pub enum InsertPosition {
     End,
 }
 
+#[derive(Debug)]
 pub struct InsertData {
     pub uri: text::RcString,
     pub title: Option<text::RcString>,
@@ -672,6 +708,40 @@ pub struct InsertData {
     pub reuse_id: Option<Id>,
 }
 
+impl InsertData {
+
+    pub fn new(uri: text::RcString) -> InsertData {
+        InsertData {
+            uri,
+            title: None,
+            parent: None,
+            position: InsertPosition::Start,
+            reuse_id: None,
+        }
+    }
+
+    pub fn with_title(mut self, title: Option<text::RcString>) -> Self {
+        self.title = title;
+        self
+    }
+
+    pub fn with_parent(mut self, parent: Option<Id>) -> Self {
+        self.parent = parent;
+        self
+    }
+
+    pub fn with_position(mut self, position: InsertPosition) -> Self {
+        self.position = position;
+        self
+    }
+
+    pub fn with_reused_id(mut self, id: Id) -> Self {
+        self.reuse_id = Some(id);
+        self
+    }
+}
+
+#[derive(Debug)]
 struct Entry {
     id: Id,
     uri: text::RcString,
@@ -681,4 +751,12 @@ struct Entry {
     favicon: Option<cairo::Surface>,
     is_pinned: bool,
     is_noclose: bool,
+}
+
+#[derive(Debug)]
+pub struct Data {
+    pub id: Id,
+    pub title: Option<text::RcString>,
+    pub uri: text::RcString,
+    pub is_pinned: bool,
 }

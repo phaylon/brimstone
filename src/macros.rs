@@ -1,10 +1,68 @@
 
+macro_rules! format_context {
+    () => {
+        ""
+    };
+    ($(,)*) => {
+        ""
+    };
+    ($var:ident $(,)*) => {
+        format!("{} = {:#?}\n", stringify!($var), $var)
+    };
+    ($var:ident: $val:expr $(,)*) => {
+        format!("{} = {:#?}\n", stringify!($var), $val)
+    };
+    ($var:ident, $($rest:tt)*) => {
+        format!("{} = {:#?}\n{}", stringify!($var), $var, format_context!($($rest)*))
+    };
+    ($var:ident: $val:expr, $($rest:tt)*) => {
+        format!("{} = {:#?}\n{}", stringify!($var), $val, format_context!($($rest)*))
+    }
+}
+
+macro_rules! expect_ok {
+    ($source:expr, $what:expr) => {
+        expect_ok!($source, $what, )
+    };
+    ($source:expr, $what:expr, $($rest:tt)*) => {
+        match $source {
+            Ok(value) => value,
+            Err(err) => panic!(
+                "Encountered error during: {}\nError: {:?}\n{}",
+                $what,
+                err,
+                format_context!($($rest)*)
+            ),
+        }
+    }
+}
+
+macro_rules! expect_some {
+    ($source:expr, $what:expr) => {
+        expect_some!($source, $what, )
+    };
+    ($source:expr, $what:expr, $($rest:tt)*) => {
+        match $source {
+            Some(value) => value,
+            None => panic!(
+                "Missing expected value: {}\n{}",
+                $what,
+                format_context!($($rest)*)
+            ),
+        }
+    }
+}
+
 macro_rules! try_extract {
     ($src:expr) => { match $src { Some(value) => value, None => return Default::default() } }
 }
 
 macro_rules! fn_scope {
     ($($body:tt)*) => { (||{$($body)*})() }
+}
+
+macro_rules! try_or_false {
+    ($src:expr) => { match $src { Some(value) => value, None => return false } }
 }
 
 macro_rules! with_cloned {
@@ -15,6 +73,12 @@ macro_rules! with_cloned {
         let $var = $src.clone();
         $body
     }}
+}
+
+macro_rules! log_action {
+    ($name:expr) => {
+        log_debug!("perform action {}", $name);
+    }
 }
 
 macro_rules! log_if_level {
@@ -97,7 +161,7 @@ macro_rules! gen_tree_store_getter {
     ($name:ident, $index:ident, $ty:ty) => {
         pub fn $name<S>(store: &S, iter: &::gtk::TreeIter) -> $ty
         where S: ::gtk::IsA<::gtk::TreeModel> + ::gtk::TreeModelExt {
-            store.get_value(iter, self::index::$index as i32).get().unwrap()
+            store.get_value(iter, self::index::$index as i32).get().expect("value available")
         }
     }
 }

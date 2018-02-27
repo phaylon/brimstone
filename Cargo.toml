@@ -10,6 +10,10 @@ gdk = "*"
 pango = "*"
 cairo-rs = "*"
 rusqlite = "*"
+brimstone-we-main = { path = "brimstone-we-main" }
+brimstone-storage = { path = "brimstone-storage" }
+brimstone-domain-settings = { path = "brimstone-domain-settings" }
+brimstone-page-state = { path = "brimstone-page-state" }
 
 [dependencies.webkit2gtk]
 version = "*"
@@ -19,3 +23,25 @@ features = ["v2_16"]
 version = "*"
 features = ["v3_18"]
 
+[workspace]
+
+[profile.dev]
+debug = true
+panic = "abort"
+
+[profile.release]
+debug = true
+panic = "abort"
+lto = true
+
+[profile.test]
+debug = true
+panic = "abort"
+
+[profile.doc]
+debug = true
+panic = "abort"
+
+[profile.bench]
+debug = true
+panic = "abort"

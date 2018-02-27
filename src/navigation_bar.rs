@@ -1,6 +1,4 @@
 
-use std::rc;
-
 use gtk;
 use gdk;
 
@@ -11,47 +9,41 @@ use mouse;
 use page_store;
 use text;
 
-pub struct Bar {
+pub struct Map {
     pub container: gtk::Box,
     pub address_entry: gtk::Entry,
     pub go_back_button: gtk::Button,
     pub go_forward_button: gtk::Button,
     pub reload_button: gtk::Button,
     pub stop_button: gtk::Button,
+    pub domain_button: gtk::Button,
 }
 
-pub struct Handle {
-    bar: rc::Rc<Bar>,
-}
+impl Map {
 
-impl Handle {
-
-    pub fn new(bar: rc::Rc<Bar>) -> Handle {
-        Handle { bar }
+    pub fn new() -> Map {
+        Map {
+            container: bar::create_container(),
+            address_entry:bar::create_address_entry(),
+            go_back_button: bar::create_nav_button("go-previous", false, true),
+            go_forward_button: bar::create_nav_button("go-next", false, true),
+            reload_button: bar::create_nav_button("view-refresh", true, true),
+            stop_button: bar::create_nav_button("process-stop", true, false),
+            domain_button: bar::create_nav_button("network-server", true, true),
+        }
     }
 
-    pub fn container(&self) -> gtk::Box { self.bar.container.clone() }
+    pub fn container(&self) -> gtk::Box { self.container.clone() }
 
-    pub fn address_entry(&self) -> gtk::Entry { self.bar.address_entry.clone() }
+    pub fn address_entry(&self) -> gtk::Entry { self.address_entry.clone() }
 
-    pub fn go_back_button(&self) -> gtk::Button { self.bar.go_back_button.clone() }
+    pub fn go_back_button(&self) -> gtk::Button { self.go_back_button.clone() }
 
-    pub fn go_forward_button(&self) -> gtk::Button { self.bar.go_forward_button.clone() }
+    pub fn go_forward_button(&self) -> gtk::Button { self.go_forward_button.clone() }
 
-    pub fn stop_button(&self) -> gtk::Button { self.bar.stop_button.clone() }
+    pub fn stop_button(&self) -> gtk::Button { self.stop_button.clone() }
 
-    pub fn reload_button(&self) -> gtk::Button { self.bar.reload_button.clone() }
-}
-
-pub fn create() -> Bar {
-    Bar {
-        container: bar::create_container(),
-        address_entry:bar::create_address_entry(),
-        go_back_button: bar::create_nav_button("go-previous", false, true),
-        go_forward_button: bar::create_nav_button("go-next", false, true),
-        reload_button: bar::create_nav_button("view-refresh", true, true),
-        stop_button: bar::create_nav_button("process-stop", true, false),
-    }
+    pub fn reload_button(&self) -> gtk::Button { self.reload_button.clone() }
 }
 
 #[derive(Copy, Clone)]
@@ -98,24 +90,152 @@ fn show_nav_popup(
     menu.popup_easy(event.get_button(), event.get_time());
 }
 
-pub fn setup(app: app::Handle) {
+fn show_domain_popup(app: &app::Handle, event: &gdk::EventButton) {
+    use webkit2gtk::{ WebViewExt };
+    use gtk::{ MenuShellExt, WidgetExt, MenuExtManual, MenuItemExt };
+
+    let webview = try_extract!(app.active_webview());
+    let page_id = webview.get_page_id();
+    let page_state = try_extract!(app.page_state());
+    let data = try_extract!(page_state.fetch(page_id));
+    let domains = try_extract!(app.domain_settings());
+
+    let menu = gtk::Menu::new();
+    let source_hosts = data.host().to_expanded();
+    let mut complete = false;
+    for host in &source_hosts {
+        if domains.has_always_entry(host) {
+            let item = gtk::MenuItem::new_with_label(
+                &format!("Unallow All Requests from {}", host.as_str()),
+            );
+            menu.append(&item);
+            complete = true;
+            let host = host.clone();
+            item.connect_activate(with_cloned!(app, move |_item| {
+                let domains = try_extract!(app.domain_settings());
+                domains.remove_always_entry(&host);
+            }));
+        }
+    }
+
+    if !complete {
+
+        for host in &source_hosts {
+            let item = gtk::MenuItem::new_with_label(
+                &format!("Allow All Requests from {}", host.as_str()),
+            );
+            menu.append(&item);
+            let host = host.clone();
+            item.connect_activate(with_cloned!(app, move |_item| {
+                let domains = try_extract!(app.domain_settings());
+                domains.insert_always_entry(&host);
+            }));
+        }
+
+        let mut target_hosts = Vec::new();
+        for host in data.allowed() {
+            target_hosts.extend(host.to_expanded());
+        }
+        for host in data.denied() {
+            target_hosts.extend(host.to_expanded());
+        }
+        target_hosts.sort();
+        target_hosts.dedup();
+
+        let target_hosts = target_hosts.into_iter().map(|host| {
+            let has_entry = domains.has_entry(data.host(), &host);
+            (host, has_entry)
+        }).collect::<Vec<_>>();
+
+        if !target_hosts.is_empty() {
+            let sep = gtk::SeparatorMenuItem::new();
+            menu.append(&sep);
+        }
+
+        let mut allowed_count = 0;
+        let mut denied_count = 0;
+        for &(ref host, has_entry) in &target_hosts {
+            if !has_entry {
+                let item = gtk::MenuItem::new_with_label(
+                    &format!("Allow Requests to {}", host.as_str()),
+                );
+                menu.append(&item);
+                let host = host.clone();
+                let source = data.host().clone();
+                item.connect_activate(with_cloned!(app, move |_item| {
+                    let domains = try_extract!(app.domain_settings());
+                    domains.insert_entry(&source, &host);
+                }));
+                denied_count += 1;
+            } else {
+                allowed_count += 1;
+            }
+        }
+
+        if allowed_count > 0 && denied_count > 0 {
+            let sep = gtk::SeparatorMenuItem::new();
+            menu.append(&sep);
+        }
+
+        for &(ref host, has_entry) in &target_hosts {
+            if has_entry {
+                let item = gtk::MenuItem::new_with_label(
+                    &format!("Unallow Requests to {}", host.as_str()),
+                );
+                menu.append(&item);
+                let host = host.clone();
+                let source = data.host().clone();
+                item.connect_activate(with_cloned!(app, move |_item| {
+                    let domains = try_extract!(app.domain_settings());
+                    domains.remove_entry(&source, &host);
+                }));
+            }
+        }
+    }
+
+    app.set_cached_domain_menu(Some(menu.clone()));
+    menu.show_all();
+    menu.popup_easy(event.get_button(), event.get_time());
+}
+
+fn is_plain_host(value: &str) -> bool {
+    value.chars().all(|c| match c {
+        'a'...'z' | 'A'...'Z' | '0'...'9' | '.' | '-' => true,
+        _ => false,
+    })
+}
+
+pub fn setup(app: &app::Handle) {
     use gtk::{ BoxExt, EntryExt, WidgetExt, ActionableExt, SizeGroupExt };
     use webkit2gtk::{ WebViewExt };
     use gio::{ ActionExt };
 
-    let bar = app.navigation_bar().unwrap().bar;
-    let page_store = app.page_store().unwrap();
-    let page_tree_view = app.page_tree_view().unwrap();
+    let bar = app.navigation_bar().expect("navigation bar during setup");
+    let page_store = app.page_store().expect("page store during setup");
+    let page_tree_view = app.page_tree_view().expect("page tree view during setup");
 
     bar.container.pack_start(&bar.go_back_button, false, true, 0);
     bar.container.pack_start(&bar.go_forward_button, false, true, 0);
     bar.container.pack_start(&bar.address_entry, true, true, 0);
     bar.container.pack_start(&bar.reload_button, false, true, 0);
     bar.container.pack_start(&bar.stop_button, false, true, 0);
+    bar.container.pack_start(&bar.domain_button, false, true, 0);
+
+    bar.domain_button.connect_button_release_event(with_cloned!(app, move |_button, event| {
+        show_domain_popup(&app, event);
+        gtk::prelude::Inhibit(false)
+    }));
 
     bar.address_entry.connect_activate(with_cloned!(app, move |entry| {
-        let uri = try_extract!(entry.get_text());
+        log_debug!("address entry activated");
+
         let webview = try_extract!(app.active_webview());
+        let mut uri = try_extract!(entry.get_text());
+
+        if is_plain_host(&uri) {
+            uri = format!("http://{}", uri);
+        }
+
         webview.load_uri(&uri);
     }));
 
@@ -125,6 +245,7 @@ pub fn setup(app: app::Handle) {
     let attach_nav_popup = |button: &gtk::Button, mode| {
         button.connect_button_release_event(with_cloned!(app, move |_button, event| {
             if event.get_button() == mouse::BUTTON_RIGHT {
+                log_debug!("show navigation context menu");
                 show_nav_popup(&app, event, mode);
             }
             gtk::prelude::Inhibit(false)
@@ -147,7 +268,7 @@ pub fn setup(app: app::Handle) {
         gtk::prelude::Inhibit(false)
     }));
 
-    app.bar_size_group().unwrap().add_widget(&bar.container);
+    app.bar_size_group().expect("bar size group during setup").add_widget(&bar.container);
 
     page_store.on_load_state_change(with_cloned!(app, move |_page_store, &(id, state)| {
         if app.is_active(id) {

@@ -1,0 +1,16 @@
+[package]
+name = "brimstone-we-main"
+version = "0.1.0"
+authors = ["Robert Sedlacek <rs@474.at>"]
+
+[dependencies]
+webkit2gtk-webextension = "*"
+webkit2gtk-webextension-sys = "*"
+glib = "*"
+glib-sys = "*"
+brimstone-domain-settings = { path = "../brimstone-domain-settings" }
+brimstone-page-state = { path = "../brimstone-page-state" }
+url = "*"
+
+[lib]
+crate-type = ["cdylib"]

@@ -42,6 +42,7 @@ impl State {
     }
 
     pub fn pull(&self, id: page_store::Id) -> Option<Page> {
+        log_debug!("pull page {}", id);
         let index = self.find_index(id)?;
         let page = Some(self.items.borrow_mut().remove(index));
         self.change_notifier.emit(self, &());
@@ -49,6 +50,7 @@ impl State {
     }
 
     pub fn pull_most_recent(&self) -> Option<Page> {
+        log_debug!("pull most recent");
         let page = self.items.borrow_mut().pop();
         if page.is_some() {
             self.change_notifier.emit(self, &());
@@ -57,14 +59,15 @@ impl State {
     }
 
     pub fn push(&self, page: Page) {
-        log_debug!("pushed {:?}", &page);
-        {
-            let mut items = self.items.borrow_mut();
+        use dynamic::{ BorrowMutIn };
+
+        log_debug!("push page {}", page.id);
+        self.items.borrow_mut_in(|mut items| {
             items.push(page);
             if items.len() > 10 {
                 items.pop();
             }
-        }
+        });
         self.change_notifier.emit(self, &())
     }
 
