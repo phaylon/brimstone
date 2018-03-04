@@ -2,6 +2,7 @@
 name = "brimstone-we-main"
 version = "0.1.0"
 authors = ["Robert Sedlacek <rs@474.at>"]
+license = "MIT"
 
 [dependencies]
 webkit2gtk-webextension = "0.4.0"

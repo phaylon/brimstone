@@ -2,6 +2,7 @@
 name = "brimstone-storage"
 version = "0.1.0"
 authors = ["Robert Sedlacek <rs@474.at>"]
+license = "MIT"
 
 [dependencies]
 rusqlite = "0.13.0"

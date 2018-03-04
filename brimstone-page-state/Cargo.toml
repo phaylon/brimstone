@@ -2,6 +2,7 @@
 name = "brimstone-page-state"
 version = "0.1.0"
 authors = ["Robert Sedlacek <rs@474.at>"]
+license = "MIT"
 
 [dependencies]
 brimstone-domain-settings = { path = "../brimstone-domain-settings" }
