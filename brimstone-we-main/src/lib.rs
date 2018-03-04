@@ -1,6 +1,8 @@
 
 #[macro_use] extern crate webkit2gtk_webextension;
 
+extern crate serde;
+extern crate serde_json;
 extern crate url;
 
 extern crate brimstone_domain_settings as domain_settings;
@@ -12,26 +14,28 @@ web_extension_init_with_data!();
 
 pub fn web_extension_initialize(
     extension: &webkit2gtk_webextension::WebExtension,
-    _user_data: &glib::variant::Variant,
+    user_data: &glib::variant::Variant,
 ) {
     use webkit2gtk_webextension::{ WebExtensionExt, WebPageExt, URIRequestExt };
 
-    let domains = domain_settings::Settings::open("_profile/config/domain_settings.db")
-        .map(rc::Rc::new)
-        .unwrap();
+    let user_data = user_data.get_str().expect("web extension initialization data");
+    let init_args: page_state::InitArguments = serde_json::from_str(user_data)
+        .expect("web process initialization arguments deserialization");
 
-    let state = page_state::State::open_or_create("_profile/runtime/page_state.db")
+    let page_state_client = rc::Rc::new(page_state::Client::new(&init_args.instance));
+
+    let domains = domain_settings::Settings::open(&init_args.domain_settings_path)
         .map(rc::Rc::new)
         .unwrap();
 
     extension.connect_page_created({
         let domains = domains.clone();
-        let state = state.clone();
+        let page_state_client = page_state_client.clone();
         move |_extension, page| {
 
             page.connect_send_request({
                 let domains = domains.clone();
-                let state = state.clone();
+                let page_state_client = page_state_client.clone();
                 move |page, request, _redir_response| {
                     
                     let source_uri = page.get_uri();
@@ -56,16 +60,10 @@ pub fn web_extension_initialize(
                         return false;
                     }
 
-                    let handle = state.handle(page.get_id(), &source_host);
                     let allowed = domains.can_request(&source_host, &target_host);
 
-                    if allowed {
-                        handle.push_allowed(&target_host);
-                        false
-                    } else {
-                        handle.push_denied(&target_host);
-                        true
-                    }
+                    page_state_client.push(page.get_id(), &source_host, &target_host, allowed);
+                    !allowed
                 }
             });
         }

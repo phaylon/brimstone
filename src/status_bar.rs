@@ -43,7 +43,7 @@ impl Map {
     }
 
     fn update(&self) {
-        use gtk::{ LabelExt };
+        use gtk::prelude::*;
 
         match *self.hover_uri.borrow() {
             Some(ref uri) => self.webview_info.set_text(&uri),
@@ -53,11 +53,11 @@ impl Map {
 }
 
 pub fn setup(app: &app::Handle) {
-    use gtk::{ SizeGroupExt, BoxExt, LabelExt, WidgetExt };
+    use gtk::prelude::*;
     use pango;
 
-    let bar = try_extract!(app.status_bar());
-    let page_store = try_extract!(app.page_store());
+    let bar = app.status_bar();
+    let page_store = app.page_store();
 
     bar.page_tree_status().pack_start(&bar.page_counter(), true, true, 0);
     bar.page_tree_status().set_margin_top(3);
@@ -80,9 +80,9 @@ pub fn setup(app: &app::Handle) {
 }
 
 fn update_counter(app: &app::Handle, count: usize) {
-    use gtk::{ LabelExt };
+    use gtk::prelude::*;
 
-    let status_bar = try_extract!(app.status_bar());
+    let status_bar = app.status_bar();
     status_bar.page_counter().set_text(&format!("{} {}",
         count,
         if count == 1 { "page" } else { "pages" },

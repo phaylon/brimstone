@@ -38,20 +38,20 @@ impl Map {
     pub fn container(&self) -> &gtk::Box { &self.container }
 
     pub fn focus(&self) {
-        use gtk::{ WidgetExt };
+        use gtk::prelude::*;
 
         self.search_entry.grab_focus();
     }
 }
 
 fn search(app: &app::Handle, entry: &gtk::SearchEntry) {
-    use gtk::{ EntryExt, LabelExt };
+    use gtk::prelude::*;
 
     let text = entry.get_text();
-    let stored = try_extract!(app.stored());
+    let stored = app.stored();
     let map = stored.history();
     let text = text.unwrap_or_else(|| String::new());
-    let history = try_extract!(app.history());
+    let history = app.history();
     let count = history.search(&text, &map.model);
     map.summary.set_text(&format!("{} {}",
         count,
@@ -60,14 +60,11 @@ fn search(app: &app::Handle, entry: &gtk::SearchEntry) {
 }
 
 pub fn setup(app: &app::Handle) {
-    use gtk::{
-        WidgetExt, SearchEntryExt, TreeViewExt, CellRendererTextExt, TreeViewColumnExt,
-        CellLayoutExt,
-    };
+    use gtk::prelude::*;
     use layout::{ BuildBox };
     use pango;
 
-    let map = try_extract!(app.stored());
+    let map = app.stored();
     let map = map.history();
 
     let container = &map.container;
@@ -86,34 +83,31 @@ pub fn setup(app: &app::Handle) {
     search(app, &map.search_entry);
 
     let title_column = {
-        let title_column = gtk::TreeViewColumn::new();
-        let title_cell = gtk::CellRendererText::new();
-        title_cell.set_property_ellipsize(pango::EllipsizeMode::End);
-        title_column.pack_start(&title_cell, true);
-        title_column.add_attribute(&title_cell, "text", 0);
-        title_column.set_expand(true);
-        title_column.set_title("Page Title");
-        title_column
+        let column = gtk::TreeViewColumn::new();
+        let cell = gtk::CellRendererText::new();
+        cell.set_property_ellipsize(pango::EllipsizeMode::End);
+        column.pack_start(&cell, true);
+        column.add_attribute(&cell, "text", 0);
+        column.set_expand(true);
+        column
     };
 
     let uri_column = {
-        let uri_column = gtk::TreeViewColumn::new();
-        let uri_cell = gtk::CellRendererText::new();
-        uri_cell.set_property_ellipsize(pango::EllipsizeMode::End);
-        uri_column.pack_start(&uri_cell, true);
-        uri_column.add_attribute(&uri_cell, "text", 1);
-        uri_column.set_expand(true);
-        uri_column.set_title("Resource");
-        uri_column
+        let column = gtk::TreeViewColumn::new();
+        let cell = gtk::CellRendererText::new();
+        cell.set_property_ellipsize(pango::EllipsizeMode::End);
+        column.pack_start(&cell, true);
+        column.add_attribute(&cell, "text", 1);
+        column.set_expand(true);
+        column
     };
 
     let access_column = {
-        let access_column = gtk::TreeViewColumn::new();
-        let access_cell = gtk::CellRendererText::new();
-        access_column.pack_start(&access_cell, true);
-        access_column.add_attribute(&access_cell, "text", 2);
-        access_column.set_title("Last Access");
-        access_column
+        let column = gtk::TreeViewColumn::new();
+        let cell = gtk::CellRendererText::new();
+        column.pack_start(&cell, true);
+        column.add_attribute(&cell, "text", 2);
+        column
     };
     
     let view = &map.results;
@@ -121,21 +115,25 @@ pub fn setup(app: &app::Handle) {
     view.append_column(&uri_column);
     view.append_column(&access_column);
     view.set_tooltip_column(1);
-    view.set_headers_visible(true);
+    view.set_headers_visible(false);
 
     view.connect_row_activated(with_cloned!(app, move |view, path, _| {
-        use gtk::{ TreeModelExt };
-        use webkit2gtk::{ WebViewExt };
-
-        let model = try_extract!(view.get_model());
-        let iter = try_extract!(model.get_iter(path));
-        let uri: String = model.get_value(&iter, 3).get().expect("stored uri in model");
-
-        log_debug!("load from history: {:?}", uri);
-
-        let webview = try_extract!(app.active_webview());
-        webview.load_uri(&uri);
+        load_selected(&app, view, path);
     }));
+}
+
+fn load_selected(app: &app::Handle, view: &gtk::TreeView, path: &gtk::TreePath) {
+    use gtk::prelude::*;
+    use webkit2gtk::{ WebViewExt };
+
+    let model = view.get_model().expect("model attached to history result view");
+    let iter = unwrap_or_return!(model.get_iter(path));
+    let uri: String = model.get_value(&iter, 3).get().expect("stored uri in model");
+
+    log_debug!("load from history: {:?}", uri);
+
+    let webview = unwrap_or_return!(app.active_webview());
+    webview.load_uri(&uri);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,16 +178,22 @@ impl History {
     }
 
     pub fn search(&self, text: &str, model: &gtk::ListStore) -> usize {
-        use gtk::{ ListStoreExt, ListStoreExtManual };
+        use gtk::prelude::*;
 
         let text = text.trim();
 
-        let storage = try_extract!(self.storage.as_ref());
+        let storage = match self.storage.as_ref() {
+            Some(storage) => storage,
+            None => {
+                model.clear();
+                return 0;
+            },
+        };
         storage.with_connection(|conn| {
 
             let mut cond = String::new();
             let mut params = Vec::new();
-            for part in text.split_whitespace() {
+            for part in text::parse_search(text) {
                 if !cond.is_empty() {
                     cond.push_str(" OR ");
                 }
@@ -242,7 +246,7 @@ impl History {
                 );
             }
             Ok(count)
-        }).expect("history search successful")
+        }).expect("history storage search results")
     }
 
     fn try_write<F>(&self, body: F) -> Result<(), storage::Error>

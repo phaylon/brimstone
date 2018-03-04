@@ -7,25 +7,26 @@ use page_store;
 use mouse;
 use window;
 use text;
+use page_state;
 
 fn on_property_uri_notify(
     app: &app::Handle,
     id: page_store::Id,
     view: &webkit2gtk::WebView,
 ) {
+    use gtk::prelude::*;
     use webkit2gtk::{ WebViewExt };
-    use gtk::{ EntryExt };
 
     let uri = view.get_uri();
 
-    let page_store = try_extract!(app.page_store());
-    let nav_bar = try_extract!(app.navigation_bar());
-    let history = try_extract!(app.history());
+    let page_store = app.page_store();
+    let nav_bar = app.navigation_bar();
+    let history = app.history();
 
     log_debug!("uri for {} now {:?}", id, uri);
 
     if let &Some(ref uri) = &uri {
-        expect_ok!(history.update_access(&uri), "history update", id, uri);
+        history.update_access(&uri).expect("history storage uri update");
     }
 
     let uri = uri.unwrap_or_else(|| "".into());
@@ -45,13 +46,13 @@ fn on_property_title_notify(
     let title = view.get_title();
     let uri = view.get_uri();
 
-    let page_store = try_extract!(app.page_store());
-    let history = try_extract!(app.history());
+    let page_store = app.page_store();
+    let history = app.history();
 
     log_debug!("title for {} now {:?}", id, title);
 
     if let (&Some(ref uri), &Some(ref title)) = (&uri, &title) {
-        expect_ok!(history.update_title(&uri, &title), "successful history update", id, title);
+        history.update_title(&uri, &title).expect("history storage title update");
     }
     page_store.set_title(id, title.clone().map(|s| s.into()));
     if app.is_active(id) {
@@ -85,7 +86,7 @@ fn categorize_policy_decision(
     decision: &webkit2gtk::PolicyDecision,
     decision_type: webkit2gtk::PolicyDecisionType,
 ) -> Option<PolicyDecision> {
-    use gtk::{ Cast };
+    use gtk::prelude::*;
     use webkit2gtk::{ NavigationPolicyDecisionExt };
 
     match decision_type {
@@ -120,15 +121,15 @@ fn open_child_page(
     parent: page_store::Id,
     select: bool,
 ) {
-    let page_store = try_extract!(app.page_store());
+    let page_store = app.page_store();
 
-    let new_id = expect_some!(page_store.insert(
+    let new_id = page_store.insert(
         page_store::InsertData::new(uri.clone())
             .with_title(Some(uri))
             .with_parent(Some(parent))
-    ), "child page creation", parent);
+    ).expect("child page creation");
 
-    let page_tree_view = try_extract!(app.page_tree_view());
+    let page_tree_view = app.page_tree_view();
     page_tree_view.expand(parent, false);
 
     if select {
@@ -147,8 +148,8 @@ fn on_decide_policy(
 
     match categorize_policy_decision(decision, decision_type) {
         Some(PolicyDecision::NewWindow { decision }) => {
-            let req = try_or_false!(decision.get_request());
-            let uri = try_or_false!(req.get_uri());
+            let req = unwrap_or_return_false!(decision.get_request());
+            let uri = unwrap_or_return_false!(req.get_uri());
             decision.ignore();
             open_child_page(app, uri.into(), id, false);
             true
@@ -159,8 +160,8 @@ fn on_decide_policy(
             decision,
             shift_modifier,
         }) => {
-            let req = try_or_false!(decision.get_request());
-            let uri = try_or_false!(req.get_uri());
+            let req = unwrap_or_return_false!(decision.get_request());
+            let uri = unwrap_or_return_false!(req.get_uri());
             decision.ignore();
             open_child_page(app, uri.into(), id, shift_modifier);
             true
@@ -175,10 +176,10 @@ fn on_load_changed(
     view: &webkit2gtk::WebView,
     event: webkit2gtk::LoadEvent,
 ) {
+    use gio::prelude::*;
     use webkit2gtk::{ WebViewExt };
-    use gio::{ TlsCertificateExt };
 
-    let page_store = try_extract!(app.page_store());
+    let page_store = app.page_store();
 
     let is_loading = view.is_loading();
 
@@ -220,7 +221,7 @@ fn on_mouse_target_changed(
 ) {
     use webkit2gtk::{ HitTestResultExt };
 
-    let status_bar = try_extract!(app.status_bar());
+    let status_bar = app.status_bar();
     status_bar.set_hover_uri(hit.get_link_uri());
 }
 
@@ -228,8 +229,8 @@ pub fn create(id: page_store::Id, app: &app::Handle) -> webkit2gtk::WebView {
     use webkit2gtk::{ WebViewExtManual, WebViewExt };
 
     let new_view = webkit2gtk::WebView::new_with_context_and_user_content_manager(
-        &try_extract!(app.web_context()),
-        &try_extract!(app.user_content_manager()),
+        &app.web_context(),
+        &app.user_content_manager(),
     );
 
     new_view.connect_property_uri_notify(with_cloned!(app, move |view| {
@@ -256,14 +257,14 @@ pub fn create(id: page_store::Id, app: &app::Handle) -> webkit2gtk::WebView {
 }
 
 pub fn setup(app: &app::Handle) {
-    use gtk::{ WidgetExt, BoxExt };
+    use gtk::prelude::*;
 
-    let page_tree_view = try_extract!(app.page_tree_view());
+    let page_tree_view = app.page_tree_view();
     page_tree_view.on_selection_change(with_cloned!(app, move |_map, &id| {
         log_debug!("showing webview for page {}", id);
-        let view_space = try_extract!(app.view_space());
-        let page_store = try_extract!(app.page_store());
-        let view = try_extract!(page_store.get_view(id, &app));
+        let view_space = app.view_space();
+        let page_store = app.page_store();
+        let view = unwrap_or_return!(page_store.get_view(id, &app));
         match app.active_webview() {
             Some(webview) => webview.hide(),
             None => (),
@@ -277,9 +278,13 @@ pub fn setup(app: &app::Handle) {
     }));
 }
 
-pub fn create_web_context(is_private: bool) -> webkit2gtk::WebContext {
+pub fn create_web_context(
+    is_private: bool,
+    init_args: page_state::InitArguments,
+) -> webkit2gtk::WebContext {
     use webkit2gtk::{ WebContextExt };
-    use gtk::{ ToVariant };
+    use gtk::prelude::*;
+    use serde_json;
 
     let web_context =
         if is_private {
@@ -288,7 +293,10 @@ pub fn create_web_context(is_private: bool) -> webkit2gtk::WebContext {
             webkit2gtk::WebContext::get_default().expect("default web context")
         };
 
-    web_context.set_web_extensions_initialization_user_data(&"webkit".to_variant());
+    let init_str = serde_json::to_string(&init_args)
+        .expect("web process init arguments serializsation");
+
+    web_context.set_web_extensions_initialization_user_data(&init_str.to_variant());
     web_context.set_web_extensions_directory("target-we/debug");
     web_context.set_tls_errors_policy(webkit2gtk::TLSErrorsPolicy::Fail);
     web_context.set_process_model(webkit2gtk::ProcessModel::MultipleSecondaryProcesses);

@@ -46,8 +46,8 @@ impl Map {
     pub fn pin_action(&self) -> gio::SimpleAction { self.pin_action.clone() }
 
     pub fn update_state(&self, state: State) {
-        use gio::{ SimpleActionExt };
-        use gtk::{ ToVariant };
+        use gio::prelude::*;
+        use gtk::prelude::*;
 
         self.expand_action.set_enabled(state.has_children && !state.is_expanded);
         self.expand_all_action.set_enabled(state.has_children);
@@ -63,7 +63,7 @@ pub struct State {
 }
 
 pub fn create() -> Map {
-    use gtk::{ ToVariant };
+    use gtk::prelude::*;
 
     Map {
         menu: gtk::Menu::new_from_model(&menu::build(|menu| {
@@ -97,20 +97,20 @@ pub fn create() -> Map {
 
 pub fn setup(app: &app::Handle) {
     use gtk::{ MenuExt };
-    use gio::{ ActionExt };
+    use gio::prelude::*;
 
-    let map = try_extract!(app.page_context_menu());
-    map.menu().set_property_attach_widget(Some(try_extract!(app.page_tree_view()).widget()));
+    let map = app.page_context_menu();
+    map.menu().set_property_attach_widget(Some(app.page_tree_view().widget()));
 
     menu::setup_win_action(&app, &map.close_action, true, |app, _| {
         log_action!(ACTION_CLOSE);
-        app_action::try_close_page(&app, try_extract!(app.get_page_tree_target()));
+        app_action::try_close_page(&app, unwrap_or_return!(app.get_page_tree_target()));
     });
 
     menu::setup_win_action(&app, &map.pin_action, true, |app, action| {
         log_action!(ACTION_PIN);
-        let page_store = try_extract!(app.page_store());
-        let id = try_extract!(app.get_page_tree_target());
+        let page_store = app.page_store();
+        let id = unwrap_or_return!(app.get_page_tree_target());
         let is_active: bool =
             if let Some(state) = action.get_state() {
                 state.get().expect("boolean action state")
@@ -123,8 +123,8 @@ pub fn setup(app: &app::Handle) {
 
     menu::setup_win_action(&app, &map.duplicate_action, true, |app, _| {
         log_action!(ACTION_DUPLICATE);
-        let page_store = try_extract!(app.page_store());
-        let id = try_extract!(app.get_page_tree_target());
+        let page_store = app.page_store();
+        let id = unwrap_or_return!(app.get_page_tree_target());
         let parent = page_store.get_parent(id);
         let uri = page_store.get_uri(id);
         let title = page_store.get_title(id);
@@ -141,9 +141,9 @@ pub fn setup(app: &app::Handle) {
 
         log_action!(ACTION_RELOAD);
 
-        let id = try_extract!(app.get_page_tree_target());
-        let page_store = try_extract!(app.page_store());
-        let webview = try_extract!(page_store.try_get_view(id));
+        let id = unwrap_or_return!(app.get_page_tree_target());
+        let page_store = app.page_store();
+        let webview = unwrap_or_return!(page_store.try_get_view(id));
         webview.reload();
     });
 
@@ -152,30 +152,30 @@ pub fn setup(app: &app::Handle) {
 
         log_action!(ACTION_RELOAD_BP);
 
-        let id = try_extract!(app.get_page_tree_target());
-        let page_store = try_extract!(app.page_store());
-        let webview = try_extract!(page_store.try_get_view(id));
+        let id = unwrap_or_return!(app.get_page_tree_target());
+        let page_store = app.page_store();
+        let webview = unwrap_or_return!(page_store.try_get_view(id));
         webview.reload_bypass_cache();
     });
 
     menu::setup_win_action(&app, &map.expand_action, true, |app, _| {
         log_action!(ACTION_EXPAND);
-        let id = try_extract!(app.get_page_tree_target());
-        let page_tree_view = try_extract!(app.page_tree_view());
+        let id = unwrap_or_return!(app.get_page_tree_target());
+        let page_tree_view = app.page_tree_view();
         page_tree_view.expand(id, false);
     });
 
     menu::setup_win_action(&app, &map.expand_all_action, true, |app, _| {
         log_action!(ACTION_EXPAND_ALL);
-        let id = try_extract!(app.get_page_tree_target());
-        let page_tree_view = try_extract!(app.page_tree_view());
+        let id = unwrap_or_return!(app.get_page_tree_target());
+        let page_tree_view = app.page_tree_view();
         page_tree_view.expand(id, true);
     });
 
     menu::setup_win_action(&app, &map.collapse_action, true, |app, _| {
         log_action!(ACTION_COLLAPSE);
-        let id = try_extract!(app.get_page_tree_target());
-        let page_tree_view = try_extract!(app.page_tree_view());
+        let id = unwrap_or_return!(app.get_page_tree_target());
+        let page_tree_view = app.page_tree_view();
         page_tree_view.collapse(id);
     });
 }

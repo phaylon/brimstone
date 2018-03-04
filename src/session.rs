@@ -230,7 +230,7 @@ impl Session {
 
     pub fn update_all(&self, page_store: &page_store::Store)
     -> Result<(), storage::Error> {
-        use gtk::{ TreeModelExt };
+        use gtk::prelude::*;
         
         log_debug!("updating full tree");
 

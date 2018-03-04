@@ -26,14 +26,13 @@ impl Map {
 }
 
 pub fn setup(app: &app::Handle) {
-    use gtk::{ BoxExt, ActionableExt, SizeGroupExt, WidgetExt };
+    use gtk::prelude::*;
 
-    let bar = expect_some!(app.page_bar(), "page bar during setup");
+    let bar = app.page_bar();
     bar.container.pack_start(&bar.add_page_button, false, true, 0);
     bar.container.pack_start(&bar.remove_page_button, false, true, 0);
 
-    expect_some!(app.bar_size_group(), "bar size group during setup")
-        .add_widget(&bar.container);
+    app.bar_size_group().add_widget(&bar.container);
     
     bar.add_page_button.set_action_name(Some(app_action::ACTION_NEW));
     bar.remove_page_button.set_action_name(Some(app_action::ACTION_CLOSE));

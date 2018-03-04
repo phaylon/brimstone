@@ -52,9 +52,9 @@ pub struct Store {
 
 pub fn setup(app: &app::Handle) {
 
-    let page_tree_view = try_extract!(app.page_tree_view());
+    let page_tree_view = app.page_tree_view();
     page_tree_view.on_selection_change(with_cloned!(app, move |_map, &id| {
-        let page_store = try_extract!(app.page_store());
+        let page_store = app.page_store();
         page_store.set_read(id);
         page_store.session.as_ref().map(|session| session.update_selected(id));
     }));
@@ -112,18 +112,16 @@ impl Store {
             }
         }
 
-        let mut tree = expect_ok!(session.load_tree(), "loaded session tree");
+        let mut tree = session.load_tree()
+            .expect("session tree loaded from storage");
         tree.compact();
         let last_id = tree.find_highest_id().unwrap_or(0).checked_add(1)
             .expect("last id in available id space");
         let pinned = tree.find_pinned();
         let last_selected = tree.find_selected();
         if let Some(last_selected) = last_selected {
-            expect_ok!(
-                session.update_selected(last_selected),
-                "update selection in session",
-                last_selected,
-            );
+            session.update_selected(last_selected)
+                .expect("updated selected page in session for adjusted tree");
         }
 
         let mut entries = collections::HashMap::new();
@@ -179,19 +177,19 @@ impl Store {
     pub fn tree_store(&self) -> &gtk::TreeStore { &self.tree_store }
 
     pub fn set_unread(&self, id: Id) {
-        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
+        let iter = unwrap_or_return!(page_tree_store::find_iter_by_id(&self.tree_store, id));
         page_tree_store::set_weight(&self.tree_store, &iter, TITLE_WEIGHT_UNREAD);
     }
 
     pub fn set_read(&self, id: Id) {
-        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
+        let iter = unwrap_or_return!(page_tree_store::find_iter_by_id(&self.tree_store, id));
         page_tree_store::set_weight(&self.tree_store, &iter, TITLE_WEIGHT_DEFAULT);
     }
 
     pub fn set_pinned(&self, id: Id, is_pinned: bool) {
-        use gtk::{ TreeModelExt };
+        use gtk::prelude::*;
 
-        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
+        let iter = unwrap_or_return!(page_tree_store::find_iter_by_id(&self.tree_store, id));
         let old_parent = self.tree_store.iter_parent(&iter);
 
         self.map_entry_mut(id, |entry| entry.is_pinned = is_pinned);
@@ -251,15 +249,15 @@ impl Store {
     }
 
     pub fn get_parent(&self, id: Id) -> Option<Id> {
-        use gtk::{ TreeModelExt };
+        use gtk::prelude::*;
 
-        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
-        let parent_iter = try_extract!(self.tree_store.iter_parent(&iter));
+        let iter = page_tree_store::find_iter_by_id(&self.tree_store, id)?;
+        let parent_iter = self.tree_store.iter_parent(&iter)?;
         Some(page_tree_store::get_id(&self.tree_store, &parent_iter))
     }
 
     pub fn position(&self, id: Id) -> Option<(Option<Id>, u32)> {
-        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
+        let iter = page_tree_store::find_iter_by_id(&self.tree_store, id)?;
         page_tree_store::find_position(&self.tree_store, &iter).map(|(parent, position)| (
             parent.map(|iter| page_tree_store::get_id(&self.tree_store, &iter)),
             position,
@@ -267,13 +265,12 @@ impl Store {
     }
 
     pub fn nth_child(&self, parent: Option<Id>, index: u32) -> Option<Id> {
-        use gtk::{ TreeModelExt };
+        use gtk::prelude::*;
 
-        let parent_iter = parent.map(|id| expect_some!(
-            page_tree_store::find_iter_by_id(&self.tree_store, id),
-            "parent is is valid",
-            parent_id: id,
-        ));
+        let parent_iter = parent.map(|id| {
+            page_tree_store::find_iter_by_id(&self.tree_store, id)
+                .expect("parent id is valid")
+        });
         let child_iter = match self.tree_store.iter_nth_child(parent_iter.as_ref(), index as i32) {
             Some(child) => child,
             None => return None,
@@ -283,9 +280,9 @@ impl Store {
     }
 
     pub fn has_children(&self, id: Id) -> Option<i32> {
-        use gtk::{ TreeModelExt };
+        use gtk::prelude::*;
 
-        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
+        let iter = page_tree_store::find_iter_by_id(&self.tree_store, id)?;
         let count = self.tree_store.iter_n_children(Some(&iter));
         if count > 0 {
             Some(count)
@@ -304,7 +301,7 @@ impl Store {
                 return Some(next_id);
             }
             if let Some(parent_id) = parent {
-                let (parent_parent, parent_position) = try_extract!(self.position(parent_id));
+                let (parent_parent, parent_position) = self.position(parent_id)?;
                 parent = parent_parent;
                 position = parent_position + 1;
                 continue;
@@ -330,7 +327,7 @@ impl Store {
     }
 
     pub fn children(&self, parent: Option<&gtk::TreeIter>) -> Vec<(Id, gtk::TreeIter)> {
-        use gtk::{ TreeModelExt };
+        use gtk::prelude::*;
 
         let mut children = Vec::new();
         let count = self.tree_store.iter_n_children(parent);
@@ -347,7 +344,7 @@ impl Store {
     }
 
     pub fn close(&self, id: Id, close_children: bool) {
-        use gtk::{ Cast, TreeStoreExt, ContainerExt, WidgetExt, TreeModelExt };
+        use gtk::prelude::*;
         use dynamic::{ BorrowMutIn };
 
         log_debug!("closing page {} (close children: {:?})", id, close_children);
@@ -362,9 +359,9 @@ impl Store {
                 deep_close(page_store, store, &child_iter);
             }
 
-            let entry = page_store.entries.borrow_mut_in(|mut entries|
-                expect_some!(entries.remove(&id), "page removed", id)
-            );
+            let entry = page_store.entries.borrow_mut_in(|mut entries| {
+                entries.remove(&id).expect("page removed from storage")
+            });
             page_store.recently_closed.push(recently_closed::Page {
                 id,
                 title: entry.title,
@@ -380,7 +377,7 @@ impl Store {
 
             let mut widget: gtk::Widget = webview.upcast();
             while let Some(parent) = widget.get_parent() {
-                if let Some(name) = parent.get_name() {
+                if let Some(name) = gtk::WidgetExt::get_name(&parent) {
                     if &name == "view-space" {
                         let view_space = parent.downcast::<gtk::Container>()
                             .expect("view-space to gtk::Container");
@@ -392,10 +389,10 @@ impl Store {
             }
         }
         
-        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
+        let iter = unwrap_or_return!(page_tree_store::find_iter_by_id(&self.tree_store, id));
 
         if !close_children {
-            let (curr_parent, curr_position) = try_extract!(self.position(id));
+            let (curr_parent, curr_position) = unwrap_or_return!(self.position(id));
             let children = self.children(Some(&iter));
             for child_index in 0..children.len() {
                 let &(child_id, _) = &children[child_index];
@@ -424,7 +421,7 @@ impl Store {
         parent_iter: Option<&gtk::TreeIter>,
         position: i32,
     ) {
-        use gtk::{ TreeStoreExt, TreeModelExt, TreeStoreExtManual };
+        use gtk::prelude::*;
 
         let mut values = Vec::new();
         for column in 0..self.tree_store.get_n_columns() {
@@ -446,12 +443,11 @@ impl Store {
 
     pub fn move_to(&self, id: Id, parent: Option<Id>, position: i32) {
 
-        let iter = try_extract!(page_tree_store::find_iter_by_id(&self.tree_store, id));
-        let parent_iter = parent.map(|id| expect_some!(
-            page_tree_store::find_iter_by_id(&self.tree_store, id),
-            "parent id is valid",
-            parent_id: id,
-        ));
+        let iter = unwrap_or_return!(page_tree_store::find_iter_by_id(&self.tree_store, id));
+        let parent_iter = parent.map(|id| {
+            page_tree_store::find_iter_by_id(&self.tree_store, id)
+                .expect("parent id is valid")
+        });
 
         self.move_iter_to(iter, parent_iter.as_ref(), position);
     }
@@ -557,30 +553,21 @@ impl Store {
     pub fn get_view(&self, id: Id, app: &app::Handle) -> Option<webkit2gtk::WebView> {
         use webkit2gtk::{ WebViewExt };
 
-        let view = self.map_entry(id, |entry| entry.view.clone());
-        match view {
-            Some(Some(view)) => return Some(view),
-            Some(None) => (),
-            None => return None,
+        match self.map_entry(id, |entry| entry.view.clone())? {
+            Some(view) => return Some(view),
+            None => (),
         };
 
         log_debug!("creating webview for page {}", id);
 
-        let uri = expect_some!(
-            self.map_entry(id, |entry| entry.uri.clone()),
-            "uri for view",
-            id,
-        );
+        let uri = self.map_entry(id, |entry| entry.uri.clone())?;
         let new_view = webview::create(id, app);
         script_dialog::connect(app, &new_view);
         new_view.load_uri(&uri);
         let ret_view = new_view.clone();
         self.map_entry_mut(id, move |entry| entry.view = Some(new_view));
-        let iter = expect_some!(
-            page_tree_store::find_iter_by_id(&self.tree_store, id),
-            "view id is valid",
-            id,
-        );
+        let iter = page_tree_store::find_iter_by_id(&self.tree_store, id)
+            .expect("view id is valid");
         page_tree_store::set_style(&self.tree_store, &iter, pango::Style::Normal);
         Some(ret_view)
     }
@@ -593,7 +580,8 @@ impl Store {
     }
 
     pub fn insert(&self, data: InsertData) -> Option<Id> {
-        use gtk::{ TreeModelExt };
+        use gtk::prelude::*;
+
         let InsertData { uri, title, parent, position, reuse_id } = data;
 
         let id = reuse_id.unwrap_or_else(|| self.find_next_id());
@@ -603,10 +591,10 @@ impl Store {
 
         log_debug!("insert page {}: {:?}", id, uri.as_str());
         let parent_iter = match data.parent {
-            Some(parent_id) => Some(try_extract!(page_tree_store::find_iter_by_id(
+            Some(parent_id) => Some(page_tree_store::find_iter_by_id(
                 &self.tree_store,
                 parent_id,
-            ))),
+            )?),
             None => None,
         };
         self.entries.borrow_mut().insert(id, Entry {

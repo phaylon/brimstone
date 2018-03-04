@@ -4,6 +4,10 @@ use std::ops;
 use std::fmt;
 use std::borrow;
 
+pub fn parse_search(value: &str) -> Vec<&str> {
+    value.trim().split_whitespace().map(|term| term.trim()).collect()
+}
+
 pub fn pluralize<'a, T>(value: T, singular: &'a str, plural: &'a str) -> &'a str
 where T: Into<u64> {
     if value.into() == 1 { singular } else { plural }

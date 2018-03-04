@@ -6,7 +6,7 @@ use app;
 const APP_NAME: &str = "Brimstone";
 
 pub fn create(app: &gtk::Application) -> gtk::ApplicationWindow {
-    use gtk::{ GtkWindowExt };
+    use gtk::prelude::*;
     
     let window = gtk::ApplicationWindow::new(&app);
     window.set_title("Brimstone");
@@ -16,10 +16,10 @@ pub fn create(app: &gtk::Application) -> gtk::ApplicationWindow {
 }
 
 pub fn set_title(app: &app::Handle, title: Option<&str>, uri: Option<&str>) {
-    use gtk::{ GtkWindowExt };
+    use gtk::prelude::*;
 
     let title = title.or(uri).unwrap_or("");
-    let window = try_extract!(app.window());
+    let window = app.window();
 
     if title.is_empty() {
         window.set_title(APP_NAME);
@@ -29,12 +29,12 @@ pub fn set_title(app: &app::Handle, title: Option<&str>, uri: Option<&str>) {
 }
 
 pub fn setup(app: &app::Handle) {
-    use gtk::{ ContainerExt, WidgetExt };
+    use gtk::prelude::*;
 
-    let window = expect_some!(app.window(), "init window");
-    let page_tree_view = expect_some!(app.page_tree_view(), "init page tree view");
+    let window = app.window();
+    let page_tree_view = app.page_tree_view();
 
-    window.add(&expect_some!(app.main_paned(), "main paned during setup"));
+    window.add(&app.main_paned());
 
     window.connect_delete_event(|window, _event| {
         match confirm_close(window, "the application") {
@@ -44,7 +44,7 @@ pub fn setup(app: &app::Handle) {
     });
 
     page_tree_view.on_selection_change(with_cloned!(app, move |_map, &id| {
-        let page_store = try_extract!(app.page_store());
+        let page_store = app.page_store();
         let title = page_store.get_title(id);
         let uri = page_store.get_uri(id);
         set_title(
@@ -61,7 +61,7 @@ pub fn confirm_action(
     buttons: &[(&str, i32)],
     default: i32,
 ) -> i32 {
-    use gtk::{ DialogExt, WidgetExt };
+    use gtk::prelude::*;
 
     let dialog = gtk::MessageDialog::new(
         Some(window),
@@ -103,7 +103,7 @@ pub fn confirm_close(window: &gtk::ApplicationWindow, what: &str) -> CloseAnswer
 }
 
 pub fn present(app: &app::Handle) {
-    use gtk::{ WidgetExt };
+    use gtk::prelude::*;
 
-    expect_some!(app.window(), "window during presentation").show_all();
+    app.window().show_all();
 }

@@ -1,49 +1,90 @@
 
 use std::rc;
 use std::cell;
+use std::sync;
 
 use gtk;
 use webkit2gtk;
 
-use navigation_bar;
-use page_store;
 use app_action;
-use status_bar;
+use bookmarks;
+use domain_settings;
+use history;
+use main_paned;
+use navigation_bar;
 use page_bar;
 use page_context_menu;
+use page_state;
+use page_store;
 use page_tree_view;
+use profile;
+use session;
+use shortcuts;
+use status_bar;
 use stored;
-use main_paned;
 use webview;
 use window;
-use history;
-use session;
-use domain_settings;
-use page_state;
+
+fn arg_extract_flag(args: &mut Vec<String>, flag: &str) -> bool {
+    if args.contains(&flag.into()) {
+        args.retain(|arg| arg != flag);
+        true
+    } else {
+        false
+    }
+}
+
+fn arg_extract_value(args: &mut Vec<String>, name: &str)
+-> Result<Option<String>, ArgumentError> {
+    for index in 0..args.len() {
+        if &args[index] == name {
+            let param = args.remove(index);
+            if args.get(index).is_none() {
+                return Err(ArgumentError::MissingValue(param));
+            }
+            let value = args.remove(index);
+            if args.contains(&name.into()) {
+                return Err(ArgumentError::UnclearProfileParameters);
+            }
+            return Ok(Some(value));
+        }
+    }
+    Ok(None)
+}
+
+#[derive(Debug, Clone)]
+pub enum ArgumentError {
+    MissingValue(String),
+    UnclearProfileParameters,
+    MissingProfileParameter,
+}
 
 #[derive(Debug, Clone)]
 pub struct Arguments {
     is_private: bool,
+    profile_mode: profile::Mode,
 }
 
 impl Arguments {
 
-    pub fn extract(args: &mut Vec<String>) -> Arguments {
-        let mut is_private = false;
-        let mut rest = args.clone();
-        let mut ignored = Vec::new();
-        while !rest.is_empty() {
-            let arg = rest.remove(0);
-            if &arg == "--private" {
-                is_private = true;
-            } else {
-                ignored.push(arg);
+    pub fn extract(args: &mut Vec<String>) -> Result<Arguments, ArgumentError> {
+        let is_private = arg_extract_flag(args, "--private");
+        let profile_mode = {
+            let profile_custom = arg_extract_value(args, "--profile-custom")?;
+            let profile_xdg = arg_extract_flag(args, "--profile-xdg");
+            let profile_local = arg_extract_flag(args, "--profile-local");
+            match (profile_custom, profile_xdg, profile_local) {
+                (Some(root), false, false) => profile::Mode::Custom(root),
+                (None, true, false) => profile::Mode::Xdg,
+                (None, false, true) => profile::Mode::Local,
+                (None, false, false) => return Err(ArgumentError::MissingProfileParameter),
+                _ => return Err(ArgumentError::UnclearProfileParameters),
             }
-        }
-        *args = ignored;
-        Arguments {
+        };
+        Ok(Arguments {
             is_private,
-        }
+            profile_mode,
+        })
     }
 }
 
@@ -70,9 +111,12 @@ struct Data {
     cached_domain_menu: cell::RefCell<Option<gtk::Menu>>,
     stored: rc::Rc<stored::Map>,
     history: rc::Rc<history::History>,
+    shortcuts: rc::Rc<shortcuts::Shortcuts>,
+    bookmarks: rc::Rc<bookmarks::Bookmarks>,
     domain_settings: rc::Rc<domain_settings::Settings>,
-    page_state: rc::Rc<page_state::State>,
     is_private: bool,
+    #[allow(unused)] page_state_server: page_state::Server,
+    page_state_store: sync::Arc<sync::Mutex<page_state::Store>>,
 }
 
 pub struct Application {
@@ -83,32 +127,38 @@ impl Application {
 
     pub fn new(app: &gtk::Application, app_args: &Arguments) -> Application {
 
+        let profile = profile::Profile::new(&app_args.profile_mode);
+        log_trace!("profile {:#?}", profile);
+
         let history = history::History::open_or_create(
-            "_profile/config/history.db",
+            profile.history(),
             if app_args.is_private {
                 history::Mode::Read
             } else {
                 history::Mode::ReadWrite
             },
-        ).expect("history storage access");
-        let domains = domain_settings::Settings::open_or_create(
-            "_profile/config/domain_settings.db",
-        ).expect("domain settings storage access");
-        let page_state = page_state::State::open_or_create(
-            "_profile/runtime/page_state.db",
-        ).expect("page state inter-process storage access");
-        page_state.clear();
+        ).expect("history storage access in application setup");
+
+        let domains = domain_settings::Settings::open_or_create(profile.domain_settings())
+            .expect("domain settings storage access in application setup");
+        let shortcuts = shortcuts::Shortcuts::open_or_create(profile.shortcuts())
+            .expect("shortcuts storage access in application setup");
+        let bookmarks = bookmarks::Bookmarks::open_or_create(profile.bookmarks())
+            .expect("bookmarks storage access in application setup");
 
         let (page_store, last_selected) =
             if app_args.is_private {
                 (page_store::Store::new_stateless(), None)
             } else {
-                let session = session::Session::open_or_create("_profile/config/session.db")
-                    .expect("session storage access");
+                let session = session::Session::open_or_create(profile.session())
+                    .expect("session storage access in application setup");
                 page_store::Store::new_stateful(session)
             };
 
+        let (page_state_server, page_state_store) = page_state::run_server();
+
         let count = page_store.get_count();
+        log_trace!("page store count is {}", count);
 
         let app = Application {
             data: rc::Rc::new(Data {
@@ -118,7 +168,13 @@ impl Application {
                 page_tree_view: rc::Rc::new(page_tree_view::Map::new()),
                 navigation_bar: rc::Rc::new(navigation_bar::Map::new()),
                 view_space: gtk::Box::new(gtk::Orientation::Horizontal, 0),
-                web_context: webview::create_web_context(app_args.is_private),
+                web_context: webview::create_web_context(
+                    app_args.is_private,
+                    page_state::InitArguments {
+                        instance: page_state_server.name().into(),
+                        domain_settings_path: profile.domain_settings().into(),
+                    },
+                ),
                 user_content_manager: webview::create_user_content_manager(),
                 page_store: rc::Rc::new(page_store),
                 active_page_store_id: rc::Rc::new(cell::Cell::new(None)),
@@ -134,9 +190,12 @@ impl Application {
                 cached_domain_menu: cell::RefCell::new(None),
                 stored: rc::Rc::new(stored::Map::new()),
                 history: rc::Rc::new(history),
+                shortcuts: rc::Rc::new(shortcuts),
+                bookmarks: rc::Rc::new(bookmarks),
                 domain_settings: rc::Rc::new(domains),
-                page_state: rc::Rc::new(page_state),
                 is_private: app_args.is_private,
+                page_state_server,
+                page_state_store,
             }),
         };
 
@@ -153,21 +212,25 @@ impl Application {
         page_context_menu::setup(&app_handle);
         page_store::setup(&app_handle);
         webview::setup(&app_handle);
+        shortcuts::setup(&app_handle);
         history::setup(&app_handle);
+        bookmarks::setup(&app_handle);
         stored::setup(&app_handle);
 
         if count == 0 {
-            app_handle.page_store().expect("page store during init").insert(
-                page_store::InsertData::new("https://google.com/".into())
-                    .with_title(Some("Google".into()))
-            ).expect("successful insert into page store during init");
+            app_handle.page_store()
+                .insert(
+                    page_store::InsertData::new("https://google.com/".into())
+                        .with_title(Some("Google".into()))
+                )
+                .expect("successful insert into page store during application setup");
         }
 
         log_debug!("previously selected page: {:?}", last_selected);
         if let Some(id) = last_selected {
-            app_handle.page_tree_view().expect("page tree view during init").select(id);
+            app_handle.page_tree_view().select(id);
         } else {
-            app_handle.page_tree_view().expect("page tree view during init").select_first();
+            app_handle.page_tree_view().select_first();
         }
 
         app
@@ -185,18 +248,44 @@ pub struct Handle {
     data: rc::Weak<Data>,
 }
 
-macro_rules! fn_get_gobject {
+macro_rules! fn_get_gobject_expected {
     ($name:ident: $ty:ty) => {
-        pub fn $name(&self) -> Option<$ty> {
-            self.data.upgrade().map(|data| data.$name.clone())
+        pub fn $name(&self) -> $ty {
+            match self.data.upgrade().map(|data| data.$name.clone()) {
+                Some(value) => value,
+                None => panic!(
+                    "Expected gobject-based application component '{}' to be available",
+                    stringify!($name),
+                ),
+            }
         }
     }
 }
 
-macro_rules! fn_get_rc {
+macro_rules! fn_get_arc_mutex_expected {
     ($name:ident: $ty:ty) => {
-        pub fn $name(&self) -> Option<rc::Rc<$ty>> {
-            self.data.upgrade().map(|data| data.$name.clone())
+        pub fn $name(&self) -> sync::Arc<sync::Mutex<$ty>> {
+            match self.data.upgrade().map(|data| data.$name.clone()) {
+                Some(value) => value,
+                None => panic!(
+                    "Expected thread-shared application component '{}' to be available",
+                    stringify!($name),
+                ),
+            }
+        }
+    }
+}
+
+macro_rules! fn_get_rc_expected {
+    ($name:ident: $ty:ty) => {
+        pub fn $name(&self) -> rc::Rc<$ty> {
+            match self.data.upgrade().map(|data| data.$name.clone()) {
+                Some(value) => value,
+                None => panic!(
+                    "Expected thread-contained application component '{}' to be available",
+                    stringify!($name),
+                ),
+            }
         }
     }
 }
@@ -244,37 +333,40 @@ impl Handle {
     fn_set_cell!(select_ignore: set_select_ignored bool);
     fn_get_cell_default!(select_ignore: is_select_ignored bool, false);
 
-    fn_get_gobject!(application: gtk::Application);
-    fn_get_gobject!(window: gtk::ApplicationWindow);
-    fn_get_gobject!(view_space: gtk::Box);
-    fn_get_gobject!(main_paned: gtk::Paned);
-    fn_get_gobject!(bar_size_group: gtk::SizeGroup);
-    fn_get_gobject!(web_context: webkit2gtk::WebContext);
-    fn_get_gobject!(user_content_manager: webkit2gtk::UserContentManager);
+    fn_get_gobject_expected!(application: gtk::Application);
+    fn_get_gobject_expected!(window: gtk::ApplicationWindow);
+    fn_get_gobject_expected!(view_space: gtk::Box);
+    fn_get_gobject_expected!(main_paned: gtk::Paned);
+    fn_get_gobject_expected!(bar_size_group: gtk::SizeGroup);
+    fn_get_gobject_expected!(web_context: webkit2gtk::WebContext);
+    fn_get_gobject_expected!(user_content_manager: webkit2gtk::UserContentManager);
 
-    fn_get_rc!(app_actions: app_action::Map);
-    fn_get_rc!(page_context_menu: page_context_menu::Map);
-    fn_get_rc!(stored: stored::Map);
-    fn_get_rc!(page_tree_view: page_tree_view::Map);
-    fn_get_rc!(page_store: page_store::Store);
-    fn_get_rc!(status_bar: status_bar::Map);
-    fn_get_rc!(navigation_bar: navigation_bar::Map);
-    fn_get_rc!(page_bar: page_bar::Map);
-    fn_get_rc!(history: history::History);
-    fn_get_rc!(domain_settings: domain_settings::Settings);
-    fn_get_rc!(page_state: page_state::State);
+    fn_get_rc_expected!(app_actions: app_action::Map);
+    fn_get_rc_expected!(page_context_menu: page_context_menu::Map);
+    fn_get_rc_expected!(stored: stored::Map);
+    fn_get_rc_expected!(page_tree_view: page_tree_view::Map);
+    fn_get_rc_expected!(page_store: page_store::Store);
+    fn_get_rc_expected!(status_bar: status_bar::Map);
+    fn_get_rc_expected!(navigation_bar: navigation_bar::Map);
+    fn_get_rc_expected!(page_bar: page_bar::Map);
+    fn_get_rc_expected!(history: history::History);
+    fn_get_rc_expected!(shortcuts: shortcuts::Shortcuts);
+    fn_get_rc_expected!(bookmarks: bookmarks::Bookmarks);
+    fn_get_rc_expected!(domain_settings: domain_settings::Settings);
+
+    fn_get_arc_mutex_expected!(page_state_store: page_state::Store);
 
     pub fn is_private(&self) -> bool {
         self.data.upgrade().map(|data| data.is_private).unwrap_or(true)
     }
 
     pub fn get_active(&self) -> Option<page_store::Id> {
-        let data = try_extract!(self.data.upgrade());
+        let data = self.data.upgrade()?;
         data.active_page_store_id.get()
     }
 
     pub fn set_active(&self, id: page_store::Id, view: webkit2gtk::WebView) {
-        let data = try_extract!(self.data.upgrade());
+        let data = unwrap_or_return!(self.data.upgrade());
         data.active_page_store_id.set(Some(id));
         *data.active_webview.borrow_mut() = Some(view);
     }
@@ -304,11 +396,11 @@ impl Handle {
         result
     }
 
-    pub fn page_tree_view_widget(&self) -> Option<gtk::TreeView> {
-        self.page_tree_view().map(|map| map.widget().clone())
+    pub fn page_tree_view_widget(&self) -> gtk::TreeView {
+        self.page_tree_view().widget().clone()
     }
 
-    pub fn page_tree_store(&self) -> Option<gtk::TreeStore> {
-        self.data.upgrade().map(|data| data.page_store.tree_store().clone())
+    pub fn page_tree_store(&self) -> gtk::TreeStore {
+        self.page_store().tree_store().clone()
     }
 }

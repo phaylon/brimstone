@@ -1,68 +1,20 @@
 
-macro_rules! format_context {
-    () => {
-        ""
-    };
-    ($(,)*) => {
-        ""
-    };
-    ($var:ident $(,)*) => {
-        format!("{} = {:#?}\n", stringify!($var), $var)
-    };
-    ($var:ident: $val:expr $(,)*) => {
-        format!("{} = {:#?}\n", stringify!($var), $val)
-    };
-    ($var:ident, $($rest:tt)*) => {
-        format!("{} = {:#?}\n{}", stringify!($var), $var, format_context!($($rest)*))
-    };
-    ($var:ident: $val:expr, $($rest:tt)*) => {
-        format!("{} = {:#?}\n{}", stringify!($var), $val, format_context!($($rest)*))
-    }
-}
-
-macro_rules! expect_ok {
-    ($source:expr, $what:expr) => {
-        expect_ok!($source, $what, )
-    };
-    ($source:expr, $what:expr, $($rest:tt)*) => {
-        match $source {
-            Ok(value) => value,
-            Err(err) => panic!(
-                "Encountered error during: {}\nError: {:?}\n{}",
-                $what,
-                err,
-                format_context!($($rest)*)
-            ),
-        }
-    }
-}
-
-macro_rules! expect_some {
-    ($source:expr, $what:expr) => {
-        expect_some!($source, $what, )
-    };
-    ($source:expr, $what:expr, $($rest:tt)*) => {
+macro_rules! unwrap_or_return_false {
+    ($source:expr) => {
         match $source {
             Some(value) => value,
-            None => panic!(
-                "Missing expected value: {}\n{}",
-                $what,
-                format_context!($($rest)*)
-            ),
+            None => return false,
         }
     }
 }
 
-macro_rules! try_extract {
-    ($src:expr) => { match $src { Some(value) => value, None => return Default::default() } }
-}
-
-macro_rules! fn_scope {
-    ($($body:tt)*) => { (||{$($body)*})() }
-}
-
-macro_rules! try_or_false {
-    ($src:expr) => { match $src { Some(value) => value, None => return false } }
+macro_rules! unwrap_or_return {
+    ($source:expr) => {
+        match $source {
+            Some(value) => value,
+            None => return,
+        }
+    }
 }
 
 macro_rules! with_cloned {
@@ -145,7 +97,7 @@ macro_rules! gen_tree_store_insert {
             position: Option<u32>,
             entry: Entry,
         ) -> ::gtk::TreeIter {
-            use ::gtk::{ TreeStoreExtManual };
+            use ::gtk::prelude::*;
 
             store.insert_with_values(
                 parent,
@@ -169,7 +121,7 @@ macro_rules! gen_tree_store_getter {
 macro_rules! gen_tree_store_setter {
     ($name:ident, $index:ident, $ty:ty) => {
         pub fn $name(store: &::gtk::TreeStore, iter: &::gtk::TreeIter, value: $ty) {
-            use ::gtk::{ TreeStoreExtManual, ToValue };
+            use ::gtk::prelude::*;
             store.set_value(iter, self::index::$index, &value.to_value());
         }
     }

@@ -5,7 +5,7 @@ use glib;
 use app;
 
 pub fn add<F>(parent: &gio::Menu, title: &str, add_items: F) where F: FnOnce(&gio::Menu) {
-    use gio::{ MenuExt };
+    use gio::prelude::*;
 
     let menu = gio::Menu::new();
     parent.append_submenu(title, &menu);
@@ -13,7 +13,7 @@ pub fn add<F>(parent: &gio::Menu, title: &str, add_items: F) where F: FnOnce(&gi
 }
 
 pub fn add_item(parent: &gio::Menu, title: &str, action: &str, accel: Option<&str>) {
-    use gio::{ MenuExt, MenuItemExt };
+    use gio::prelude::*;
 
     let item = gio::MenuItem::new(title, action);
     if let Some(accel) = accel {
@@ -23,7 +23,7 @@ pub fn add_item(parent: &gio::Menu, title: &str, action: &str, accel: Option<&st
 }
 
 pub fn add_section<F>(parent: &gio::Menu, add_items: F) where F: FnOnce(&gio::Menu) {
-    use gio::{ MenuExt };
+    use gio::prelude::*;
 
     let menu = gio::Menu::new();
     parent.append_section(None, &menu);
@@ -42,9 +42,9 @@ pub fn setup_win_action<F>(
     enabled: bool,
     activate: F,
 ) where F: Fn(&app::Handle, &gio::SimpleAction) + 'static {
-    use gio::{ SimpleActionExt, ActionMapExt };
+    use gio::prelude::*;
 
-    let window = try_extract!(app.window());
+    let window = app.window();
 
     let app = app.clone();
     action.connect_activate(move |action, _| activate(&app, action));
@@ -62,9 +62,9 @@ pub fn setup_param_action<F, T>(
     F: Fn(&app::Handle, T) + 'static,
     T: glib::variant::FromVariant,
 {
-    use gio::{ SimpleActionExt, ActionMapExt };
+    use gio::prelude::*;
 
-    let application = try_extract!(app.application());
+    let application = app.application();
 
     let app = app.clone();
     action.connect_activate(move |_, param|
@@ -81,9 +81,9 @@ pub fn setup_action<F>(
     enabled: bool,
     activate: F,
 ) where F: Fn(&app::Handle, &gio::SimpleAction) + 'static {
-    use gio::{ SimpleActionExt, ActionMapExt };
+    use gio::prelude::*;
 
-    let application = try_extract!(app.application());
+    let application = app.application();
 
     let app = app.clone();
     action.connect_activate(move |action, _| activate(&app, action));

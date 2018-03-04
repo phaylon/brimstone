@@ -4,23 +4,26 @@ version = "0.1.0"
 authors = ["Robert Sedlacek <rs@474.at>"]
 
 [dependencies]
-glib = "*"
-gio = "*"
-gdk = "*"
-pango = "*"
-cairo-rs = "*"
-rusqlite = "*"
+glib = "0.4.1"
+gio = "0.3.0"
+gdk = "0.7.0"
+pango = "0.3.0"
+cairo-rs = "0.3.0"
+rusqlite = "0.13.0"
+serde_json = "1.0"
+serde = "1.0"
+xdg = "2.1.0"
 brimstone-we-main = { path = "brimstone-we-main" }
 brimstone-storage = { path = "brimstone-storage" }
 brimstone-domain-settings = { path = "brimstone-domain-settings" }
 brimstone-page-state = { path = "brimstone-page-state" }
 
 [dependencies.webkit2gtk]
-version = "*"
+version = "0.3.0"
 features = ["v2_16"]
 
 [dependencies.gtk]
-version = "*"
+version = "0.3.0"
 features = ["v3_18"]
 
 [workspace]

@@ -5,5 +5,5 @@ authors = ["Robert Sedlacek <rs@474.at>"]
 
 [dependencies]
 brimstone-storage = { path = "../brimstone-storage" }
-tendril = "*"
-url = "*"
+tendril = "0.4.0"
+url = "1.7.0"

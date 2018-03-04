@@ -2,7 +2,7 @@
 use gtk;
 
 pub fn create_nav_button(name: &str, sensitivity: bool, visibility: bool) -> gtk::Button {
-    use gtk::{ WidgetExt };
+    use gtk::prelude::*;
 
     let button = gtk::Button::new_from_icon_name(
         name,
@@ -17,7 +17,7 @@ pub fn create_nav_button(name: &str, sensitivity: bool, visibility: bool) -> gtk
 }
 
 pub fn create_address_entry() -> gtk::Entry {
-    use gtk::{ EntryExt };
+    use gtk::prelude::*;
 
     let entry = gtk::Entry::new();
     entry.set_activates_default(false);

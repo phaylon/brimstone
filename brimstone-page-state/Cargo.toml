@@ -4,6 +4,8 @@ version = "0.1.0"
 authors = ["Robert Sedlacek <rs@474.at>"]
 
 [dependencies]
-brimstone-storage = { path = "../brimstone-storage" }
 brimstone-domain-settings = { path = "../brimstone-domain-settings" }
-
+dbus = "0.6.1"
+nix = "0.10.0"
+serde_derive = "1.0"
+serde = "1.0"

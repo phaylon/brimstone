@@ -1,138 +1,216 @@
 
-extern crate brimstone_storage as storage;
+extern crate nix;
+extern crate dbus;
+extern crate serde;
+
+#[macro_use]
+extern crate serde_derive;
+
 extern crate brimstone_domain_settings as domain_settings;
 
+use std::thread;
+use std::rc;
+use std::cell;
+use std::collections;
+use std::sync;
 use std::path;
 
-use storage::rusqlite;
+const PATH_OBJECT: &str = "/at/dunkelheit/brimstone/page_state";
+const INTERFACE: &str = "at.dunkelheit.brimstone.page_state";
+const METHOD_SET_PAGE_HOST: &str = "SetPageHost";
+const METHOD_QUIT: &str = "Quit";
 
-fn init_storage(conn: &mut rusqlite::Connection) -> Result<(), rusqlite::Error> {
-    conn.execute("
-        CREATE TABLE page_host (
-            page_id INTEGER NOT NULL UNIQUE,
-            host TEXT,
-            host_is_domain INTEGER
-        )
-    ", &[])?;
-    conn.execute("
-        CREATE TABLE page_request (
-            page_id INTEGER NOT NULL,
-            host TEXT NOT NULL,
-            host_is_domain INTEGER,
-            allowed INTEGER
-        )
-    ", &[])?;
-    conn.execute("
-        CREATE UNIQUE INDEX idx_page_request
-        ON page_request (page_id, host)
-    ", &[])?;
-    Ok(())
+#[derive(Debug, Deserialize, Serialize)]
+pub struct InitArguments {
+    pub instance: String,
+    pub domain_settings_path: path::PathBuf,
 }
 
-pub struct State {
-    storage: storage::Storage,
+fn unpack_host(host: &domain_settings::Host) -> (String, bool) {
+    (host.as_str().into(), host.is_domain())
 }
 
-impl State {
+fn pack_host(&(ref host, is_domain): &(String, bool)) -> domain_settings::Host {
+    domain_settings::Host::new(host, is_domain)
+}
 
-    pub fn open_in_memory() -> Result<Self, storage::Error> {
-        Ok(State {
-            storage: storage::Storage::open_in_memory(init_storage)?,
+pub struct Store {
+    pages: collections::HashMap<u64, StoreEntry>,
+}
+
+impl Store {
+
+    pub fn get_data(&self, page_id: u64) -> Option<Data> {
+        self.pages.get(&page_id).map(|data| Data {
+            host: pack_host(&data.host),
+            allowed: data.allowed.iter().map(|host| pack_host(host)).collect(),
+            denied: data.denied.iter().map(|host| pack_host(host)).collect(),
         })
     }
 
-    pub fn open_or_create<P>(path: P) -> Result<Self, storage::Error>
-    where P: AsRef<path::Path> {
-        Ok(State {
-            storage: storage::Storage::open_or_create(
-                path,
-                init_storage,
-                storage::do_nothing,
-            )?,
-        })
-    }
-
-    pub fn clear(&self) {
-        self.storage.with_transaction(|tx| {
-            tx.execute("DELETE FROM page_host", &[])?;
-            tx.execute("DELETE FROM page_request", &[])?;
-            Ok(())
-        }).unwrap();
-        self.storage.with_connection(|conn| {
-            conn.execute("VACUUM", &[])?;
-            Ok(())
-        }).unwrap();
-    }
-
-    pub fn fetch(&self, page_id: u64) -> Option<Data> {
-        self.storage.with_connection(|conn| {
-
-            let mut stmt = conn
-                .prepare("SELECT host, host_is_domain FROM page_host WHERE page_id = ?")?;
-            let mut rows = stmt.query(&[&(page_id as u32)])?;
-            let row = match rows.next() {
-                Some(row) => row?,
-                None => return Ok(None),
-            };
-            let host: Option<String> = row.get(0);
-            let host_is_domain: u32 = row.get(1);
-            let host_is_domain = host_is_domain != 0;
-            let host = match host {
-                Some(host) => domain_settings::Host::new(&host, host_is_domain),
-                None => return Ok(None),
-            };
-
-            let mut stmt = conn.prepare("
-                SELECT host, allowed, host_is_domain
-                FROM page_request
-                WHERE page_id = ?
-            ")?;
-            let mut rows = stmt.query(&[&(page_id as u32)])?;
-            let mut allowed = Vec::new();
-            let mut denied = Vec::new();
-            while let Some(row) = rows.next() {
-                let row = row?;
-                let host: String = row.get(0);
-                let is_allowed: u32 = row.get(1);
-                let is_allowed = is_allowed != 0;
-                let is_domain: u32 = row.get(2);
-                let is_domain = is_domain != 0;
-                let host = domain_settings::Host::new(&host, is_domain);
-                if is_allowed {
-                    allowed.push(host);
-                } else {
-                    denied.push(host);
-                }
-            }
-
-            Ok(Some(Data { host, allowed, denied }))
-        }).unwrap()
-    }
-
-    pub fn handle(&self, page_id: u64, host: &domain_settings::Host) -> Handle {
-        self.storage.with_transaction(|tx| {
-            let current: u32 = tx.query_row(
-                "SELECT COUNT(host) FROM page_host WHERE page_id = ? AND host LIKE ?",
-                &[&(page_id as u32), &host.as_str()],
-                |row| row.get(0),
-            )?;
-            if current == 0 {
-                tx.execute("
-                    INSERT OR REPLACE
-                    INTO page_host (page_id, host, host_is_domain)
-                    VALUES (?, ?, ?)
-                ", &[&(page_id as u32), &host.as_str(), &host.is_domain()])?;
-                tx.execute(
-                    "DELETE FROM page_request WHERE page_id = ?",
-                    &[&(page_id as u32)],
-                )?;
-            }
-            Ok(())
-        }).unwrap();
-        Handle {
-            state: self,
-            page_id,
+    fn push(
+        &mut self,
+        page_id: u64,
+        source: &domain_settings::Host,
+        target: &domain_settings::Host,
+        is_allowed: bool,
+    ) {
+        let entry = self.pages.entry(page_id).or_insert_with(|| StoreEntry {
+            host: unpack_host(source),
+            allowed: Vec::new(),
+            denied: Vec::new(),
+        });
+        if &pack_host(&entry.host) != source {
+            entry.allowed.clear();
+            entry.denied.clear();
         }
+        if is_allowed {
+            entry.allowed.push(unpack_host(target));
+        } else {
+            entry.denied.push(unpack_host(target));
+        }
+    }
+}
+
+pub struct StoreEntry {
+    host: (String, bool),
+    allowed: Vec<(String, bool)>,
+    denied: Vec<(String, bool)>,
+}
+
+#[derive(Debug)]
+pub struct Server {
+    name: String,
+}
+
+impl Server {
+
+    pub fn name(&self) -> &str { &self.name }
+}
+
+impl Drop for Server {
+
+    fn drop(&mut self) {
+        println!("DROP");
+        let client = Client::new(&self.name);
+        client.quit();
+    }
+}
+
+pub fn run_server() -> (Server, sync::Arc<sync::Mutex<Store>>) {
+    let name = format!("{}.instance-{}", INTERFACE, nix::unistd::getpid());
+    let store = sync::Arc::new(sync::Mutex::new(Store {
+        pages: collections::HashMap::new(),
+    }));
+    thread::spawn({
+        let name = name.clone();
+        let store = store.clone();
+        move || {
+            let quit_flag = rc::Rc::new(cell::Cell::new(false));
+            let conn = dbus::Connection::get_private(dbus::BusType::Session)
+                .expect("dbus session bus access");
+            conn.register_name(&name, dbus::NameFlag::ReplaceExisting as u32)
+                .expect(&format!("dbus name {:?}", name));
+            let fac = dbus::tree::Factory::new_fn::<()>();
+            let tree = fac
+                .tree(())
+                .add(fac.object_path(PATH_OBJECT, ()).add(
+                    fac.interface(INTERFACE, ())
+                        .add_m({
+                            let quit_flag = quit_flag.clone();
+                            fac.method(METHOD_QUIT, (), move |_m| {
+                                quit_flag.set(true);
+                                Ok(Vec::new())
+                            })
+                        })
+                        .add_m(
+                            fac.method(METHOD_SET_PAGE_HOST, (), move |m| {
+                                let mut args = m.msg.iter_init();
+                                let source = {
+                                    let host: &str = args.read()?;
+                                    let is_domain: bool = args.read()?;
+                                    domain_settings::Host::new(host, is_domain)
+                                };
+                                let target = {
+                                    let host: &str = args.read()?;
+                                    let is_domain: bool = args.read()?;
+                                    domain_settings::Host::new(host, is_domain)
+                                };
+                                let is_allowed: bool = args.read()?;
+                                let page_id: u64 = args.read()?;
+                                store.lock()
+                                    .expect("page state storage access")
+                                    .push(page_id, &source, &target, is_allowed);
+                                Ok(Vec::new())
+                            })
+                            .inarg::<&str, _>("source_host")
+                            .inarg::<bool, _>("source_host_is_domain")
+                            .inarg::<&str, _>("target_host")
+                            .inarg::<bool, _>("target_host_is_domain")
+                            .inarg::<bool, _>("is_allowed")
+                            .inarg::<u64, _>("page_id")
+                        )
+                ));
+            tree.set_registered(&conn, true)
+                .expect("dbus tree registered");
+            conn.add_handler(tree);
+            loop {
+                if quit_flag.get() {
+                    return;
+                }
+                conn.incoming(1000).next();
+            }
+        }
+    });
+    (Server { name }, store)
+}
+
+pub struct Client {
+    name: String,
+    conn: dbus::Connection,
+}
+
+impl Client {
+
+    pub fn new(name: &str) -> Client {
+        Client {
+            name: name.into(),
+            conn: dbus::Connection::get_private(dbus::BusType::Session)
+                .expect("dbus client connection"),
+        }
+    }
+
+    pub fn quit(&self) {
+        let call = dbus::Message::new_method_call(
+            &self.name,
+            PATH_OBJECT,
+            INTERFACE,
+            METHOD_QUIT,
+        ).expect("dbus quit method message construction");
+        self.conn.send(call).expect("dbus quit method call dispatch");
+    }
+
+    pub fn push(
+        &self,
+        page_id: u64,
+        source: &domain_settings::Host,
+        target: &domain_settings::Host,
+        is_allowed: bool,
+    ) {
+        let call =
+            dbus::Message::new_method_call(
+                &self.name,
+                PATH_OBJECT,
+                INTERFACE,
+                METHOD_SET_PAGE_HOST,
+            ).expect("dbus push method message construction")
+            .append1(source.as_str())
+            .append1(source.is_domain())
+            .append1(target.as_str())
+            .append1(target.is_domain())
+            .append1(is_allowed)
+            .append1(page_id);
+        self.conn.send(call).expect("dbus push method call dispatch");
     }
 }
 
@@ -151,67 +229,3 @@ impl Data {
     pub fn denied(&self) -> &[domain_settings::Host] { &self.denied }
 }
 
-pub struct Handle<'s> {
-    state: &'s State,
-    page_id: u64,
-}
-
-impl<'s> Handle<'s> {
-
-    pub fn push_allowed(&self, host: &domain_settings::Host) {
-        self.push(host, true);
-    }
-
-    pub fn push_denied(&self, host: &domain_settings::Host) {
-        self.push(host, false);
-    }
-
-    fn push(&self, host: &domain_settings::Host, allowed: bool) {
-        self.state.storage.with_transaction(|tx| {
-            tx.execute("
-                INSERT OR REPLACE
-                INTO page_request (page_id, host, host_is_domain, allowed)
-                VALUES (?, ?, ?, ?)
-            ", &[
-                &(self.page_id as u32),
-                &host.as_str(),
-                &host.is_domain(),
-                &if allowed { 1 } else { 0 },
-            ])?;
-            Ok(())
-        }).unwrap();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use domain_settings;
-
-    #[test]
-    fn storage() {
-
-        let storage = State::open_in_memory().unwrap();
-        let handle = storage.handle(23, &domain_settings::Host::new("www.source.com", true));
-
-        handle.push_allowed(&domain_settings::Host::new("www.allowed.com", true));
-        handle.push_allowed(&domain_settings::Host::new("www.allowed.com", true));
-
-        handle.push_denied(&domain_settings::Host::new("www1.denied.com", true));
-        handle.push_denied(&domain_settings::Host::new("www2.denied.com", true));
-
-        drop(handle);
-        let data = storage.fetch(23).expect("data available");
-        assert_eq!(data.host(), &domain_settings::Host::new("www.source.com", true));
-        assert_eq!(data.allowed(), &[
-            domain_settings::Host::new("www.allowed.com", true),
-        ]);
-        assert_eq!(data.denied(), &[
-            domain_settings::Host::new("www1.denied.com", true),
-            domain_settings::Host::new("www2.denied.com", true),
-        ]);
-
-        storage.clear();
-        assert!(storage.fetch(23).is_none());
-    }
-}

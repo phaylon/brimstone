@@ -43,12 +43,11 @@ pub fn cmp(store: &gtk::TreeStore, a: &gtk::TreeIter, b: &gtk::TreeIter) -> bool
 }
 
 pub fn recalc(tree_store: &gtk::TreeStore, iter: &gtk::TreeIter) {
-    use gtk::{ TreeModelExt };
+    use gtk::prelude::*;
     
     let mut sum = 0;
     for index in 0..tree_store.iter_n_children(iter) {
-        let child_iter = tree_store.iter_nth_child(iter, index)
-            .expect("child iter for valid index is available");
+        let child_iter = tree_store.iter_nth_child(iter, index).expect("indexed child");
         sum += 1 + get_child_count(tree_store, &child_iter);
     }
 
@@ -67,7 +66,7 @@ pub fn find_position(
     store: &gtk::TreeStore,
     iter: &gtk::TreeIter,
 ) -> Option<(Option<gtk::TreeIter>, u32)> {
-    use gtk::{ TreeModelExt };
+    use gtk::prelude::*;
 
     let id = get_id(store, iter);
 
@@ -96,7 +95,7 @@ pub fn find_iter_by_id(
         id: page_store::Id,
         parent: Option<&gtk::TreeIter>,
     ) -> Option<gtk::TreeIter> {
-        use gtk::{ TreeModelExt };
+        use gtk::prelude::*;
 
         let count = store.iter_n_children(parent);
         for index in 0..count {
